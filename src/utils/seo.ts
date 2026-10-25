@@ -29,7 +29,12 @@ export function updateDocumentSeo(options: SeoMetadataOptions): void {
   setMetaTag('og:description', description, 'property');
   setMetaTag('og:type', type, 'property');
   setMetaTag('og:site_name', 'GetVidX', 'property');
-  const canonicalUrl = `${CANONICAL_DOMAIN}${pathname.startsWith('/') ? pathname : `/${pathname}`}`;
+  const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
+  const cleanPath = normalizedPath.replace(/^\/(en|es|fr|pt|ar)(\/|$)/, '/');
+  const localizedPath = locale === 'en'
+    ? cleanPath
+    : `/${locale}${cleanPath === '/' ? '' : cleanPath}`;
+  const canonicalUrl = `${CANONICAL_DOMAIN}${localizedPath}`;
   setMetaTag('og:url', canonicalUrl, 'property');
   if (imageUrl) {
     setMetaTag('og:image', imageUrl, 'property');
@@ -130,7 +135,7 @@ export function buildWebApplicationSchema(locale: SupportedLocale): Record<strin
     operatingSystem: 'All',
     browserRequirements: 'Requires JavaScript. Requires HTML5.',
     description:
-      'High-speed Twitter (X) video downloader. Save MP4 videos in 1080p Full HD, GIFs, and MP3 audio directly to your device.',
+      'Online tool to check available formats and download supported videos from public Twitter (X) posts. Available formats depend on the source media.',
     offers: {
       '@type': 'Offer',
       price: '0',

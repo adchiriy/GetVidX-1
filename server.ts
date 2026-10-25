@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { Readable } from 'stream';
 import { spawn, execFile } from 'child_process';
@@ -12,6 +13,7 @@ import {
 } from './src/data/sitemapData';
 import { parseTwitterUrl } from './src/utils/twitterUrl';
 import { buildMediaFormats, buildPhotoFormats } from './src/utils/downloader';
+import { prerenderPage } from './src/utils/prerender';
 
 const execFileAsync = promisify(execFile);
 
@@ -20,13 +22,14 @@ const execFileAsync = promisify(execFile);
  */
 async function resolveWithYtDlp(targetUrl: string): Promise<any | null> {
   try {
-    const { stdout } = await execFileAsync('/usr/local/bin/yt-dlp', [
+    const ytdlpBin = fs.existsSync('/usr/local/bin/yt-dlp') ? '/usr/local/bin/yt-dlp' : 'yt-dlp';
+    const { stdout } = await execFileAsync(ytdlpBin, [
       '--dump-json',
       '--no-playlist',
       '--no-warnings',
-      '--socket-timeout', '10',
+      '--socket-timeout', '6',
       targetUrl,
-    ], { timeout: 15000 });
+    ], { timeout: 10000 });
 
     if (stdout && stdout.trim()) {
       return JSON.parse(stdout.trim());
@@ -208,7 +211,12 @@ async function startServer() {
 
       const parsed = parseTwitterUrl(url);
       if (!parsed.isValid || !parsed.postId) {
-        res.status(400).json({ success: false, error: parsed.error, errorCode: 'INVALID_DOMAIN' });
+        const isDomainError = parsed.error?.includes('Host must be') || parsed.error?.includes('Unsupported protocol');
+        res.status(400).json({
+          success: false,
+          error: parsed.error,
+          errorCode: isDomainError ? 'INVALID_DOMAIN' : 'INVALID_ID',
+        });
         return;
       }
 
@@ -216,22 +224,18 @@ async function startServer() {
       const username = parsed.username || 'i';
       const isLivePost = Boolean(parsed.isLive || parsed.isSpace || parsed.isBroadcast);
 
-      // Resilient Multi-Resolver with bot headers for VxTwitter to guarantee 200 responses:
+      // Fast, resilient concurrent resolvers for Twitter/X posts
       const resolverConfigs = [
         { url: `https://api.fxtwitter.com/2/status/${postId}`, ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-        { url: `https://api.vxtwitter.com/i/status/${postId}`, ua: 'TelegramBot (like TwitterBot)' },
+        { url: `https://api.vxtwitter.com/Twitter/status/${postId}`, ua: 'TelegramBot (like TwitterBot)' },
         { url: `https://api.fxtwitter.com/${username}/status/${postId}`, ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
         { url: `https://api.vxtwitter.com/${username}/status/${postId}`, ua: 'Twitterbot/1.0' },
-        { url: `https://api.fxtwitter.com/status/${postId}`, ua: 'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)' },
       ];
 
-      let data: any = null;
-      let textOnlyCandidate: any = null;
-
-      for (const config of resolverConfigs) {
+      const fetchCandidate = async (config: { url: string; ua: string }) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000);
         try {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 6000);
           const response = await fetch(config.url, {
             headers: {
               'User-Agent': config.ua,
@@ -239,35 +243,32 @@ async function startServer() {
             },
             signal: controller.signal,
           });
-          clearTimeout(timeout);
-
           if (response.ok) {
             const json = await response.json();
-            // Handle fxtwitter v2 (json.status), fxtwitter v1 (json.tweet), and vxtwitter
-            const candidate = json.status || json.tweet || json;
-            if (candidate) {
-              const hasMedia = Boolean(
-                (candidate.media && (candidate.media.videos?.length > 0 || candidate.media.photos?.length > 0)) ||
-                (candidate.media_extended && candidate.media_extended.length > 0) ||
-                (candidate.mediaURLs && candidate.mediaURLs.length > 0) ||
-                candidate.embed_card ||
-                candidate.quote
-              );
-              if (hasMedia) {
-                data = candidate;
-                break;
-              } else if (!textOnlyCandidate && (candidate.text || candidate.id || candidate.conversationID)) {
-                textOnlyCandidate = candidate;
-              }
-            }
+            return json.status || json.tweet || json;
           }
         } catch (_) {
-          // Continue to next resolver if one fails
+          // Ignore failed candidate
+        } finally {
+          clearTimeout(timeout);
         }
-      }
+        return null;
+      };
 
-      if (!data && textOnlyCandidate) {
-        data = textOnlyCandidate;
+      const candidates = await Promise.all(resolverConfigs.map(fetchCandidate));
+
+      let data: any = candidates.find((c) =>
+        Boolean(
+          (c?.media && (c.media.videos?.length > 0 || c.media.photos?.length > 0)) ||
+          (c?.media_extended && c.media_extended.length > 0) ||
+          (c?.mediaURLs && c.mediaURLs.length > 0) ||
+          c?.embed_card ||
+          c?.quote
+        )
+      );
+
+      if (!data) {
+        data = candidates.find((c) => c && (c.text || c.id || c.conversationID || c.tweetID));
       }
 
       // If data wasn't found through standard resolvers or if it is a Live/Space,
@@ -958,20 +959,49 @@ async function startServer() {
     }
   });
 
-  // 6. Mount Vite middleware for development or serve dist for production
+  // 6. Mount Vite middleware for development or serve dist for production with SEO prerendering
   if (!isProd) {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
         hmr: false,
       },
-      appType: 'spa',
+      appType: 'custom',
     });
     app.use(vite.middlewares);
+
+    app.get('*', async (req: Request, res: Response, next) => {
+      if (req.path.startsWith('/api') || req.path.startsWith('/@') || req.path.includes('.')) {
+        return next();
+      }
+
+      try {
+        const rawTemplate = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
+        const transformedTemplate = await vite.transformIndexHtml(req.originalUrl, rawTemplate);
+        const { status, html } = prerenderPage(req.path, transformedTemplate);
+        res.status(status).set({ 'Content-Type': 'text/html; charset=utf-8' }).send(html);
+      } catch (err: any) {
+        vite.ssrFixStacktrace(err);
+        next(err);
+      }
+    });
   } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
-    app.get('*', (_req: Request, res: Response) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+    const distPath = path.resolve(__dirname, 'dist');
+    app.use(express.static(distPath, { index: false }));
+
+    app.get('*', (req: Request, res: Response, next) => {
+      if (req.path.startsWith('/api') || req.path.includes('.')) {
+        return next();
+      }
+
+      try {
+        const templateHtml = fs.readFileSync(path.resolve(distPath, 'index.html'), 'utf-8');
+        const { status, html } = prerenderPage(req.path, templateHtml);
+        res.status(status).set({ 'Content-Type': 'text/html; charset=utf-8' }).send(html);
+      } catch (err) {
+        console.error('Prerender error in production:', err);
+        res.sendFile(path.resolve(distPath, 'index.html'));
+      }
     });
   }
 

@@ -378,7 +378,7 @@ export const DownloadResult: React.FC<DownloadResultProps> = ({
                   : (fmt.isLiveStream && fmt.format === 'MP3')
                   ? (t.downloadSpaceAudio || 'Download Space Audio (MP3)')
                   : fmt.isAudioOnly
-                  ? t.extractAudio
+                  ? (fmt.filename.endsWith('.m4a') ? (currentLocale === 'es' ? 'Descargar Audio M4A' : currentLocale === 'fr' ? 'Télécharger Audio M4A' : currentLocale === 'pt' ? 'Baixar Áudio M4A' : currentLocale === 'ar' ? 'تنزيل صوت M4A' : 'Download M4A Audio') : t.extractAudio)
                   : t.actionDownload;
 
                 const buttonColor = isPhoto

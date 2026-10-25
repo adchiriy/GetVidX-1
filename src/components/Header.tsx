@@ -30,8 +30,12 @@ export const Header: React.FC<HeaderProps> = ({ currentLocale, onSelectLocale, o
     <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-100 transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4 md:gap-8">
         {/* Zone 1: Brand Wordmark */}
-        <button
-          onClick={() => onNavigate('/')}
+        <a
+          href={currentLocale === 'en' ? '/' : `/${currentLocale}`}
+          onClick={(e) => {
+            e.preventDefault();
+            onNavigate('/');
+          }}
           className="flex items-center gap-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 rounded-lg group cursor-pointer"
           aria-label="GetVidX Home"
         >
@@ -41,30 +45,44 @@ export const Header: React.FC<HeaderProps> = ({ currentLocale, onSelectLocale, o
           <span className="text-xl font-bold tracking-tight text-slate-900 group-hover:text-blue-600 transition-colors">
             GetVidX
           </span>
-        </button>
+        </a>
 
         {/* Zone 2: Navigation Links (single-line, clean typography) */}
         <nav className="hidden lg:flex items-center gap-6 text-sm font-medium text-slate-600">
-          <button
-            onClick={() => onNavigate('/')}
+          <a
+            href={currentLocale === 'en' ? '/' : `/${currentLocale}`}
+            onClick={(e) => {
+              e.preventDefault();
+              onNavigate('/');
+            }}
             className="hover:text-blue-600 transition-colors whitespace-nowrap cursor-pointer"
           >
             {t.navDownloader}
-          </button>
-          <button
-            onClick={() => onNavigate('/twitter-to-mp3')}
+          </a>
+          <a
+            href={currentLocale === 'en' ? '/twitter-to-mp3' : `/${currentLocale}/twitter-to-mp3`}
+            onClick={(e) => {
+              e.preventDefault();
+              onNavigate('/twitter-to-mp3');
+            }}
             className="hover:text-blue-600 transition-colors whitespace-nowrap cursor-pointer"
           >
             {t.navMp3}
-          </button>
-          <button
-            onClick={() => onNavigate('/twitter-gif-downloader')}
+          </a>
+          <a
+            href={currentLocale === 'en' ? '/twitter-gif-downloader' : `/${currentLocale}/twitter-gif-downloader`}
+            onClick={(e) => {
+              e.preventDefault();
+              onNavigate('/twitter-gif-downloader');
+            }}
             className="hover:text-blue-600 transition-colors whitespace-nowrap cursor-pointer"
           >
             {t.navGif}
-          </button>
-          <button
-            onClick={() => {
+          </a>
+          <a
+            href={currentLocale === 'en' ? '/' : `/${currentLocale}`}
+            onClick={(e) => {
+              e.preventDefault();
               onNavigate('/');
               if (onSelectLive) onSelectLive();
             }}
@@ -75,9 +93,11 @@ export const Header: React.FC<HeaderProps> = ({ currentLocale, onSelectLocale, o
               <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
             </span>
             <span>{t.navLive}</span>
-          </button>
-          <button
-            onClick={() => {
+          </a>
+          <a
+            href="#how-it-works"
+            onClick={(e) => {
+              e.preventDefault();
               onNavigate('/');
               setTimeout(() => {
                 document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' });
@@ -86,9 +106,11 @@ export const Header: React.FC<HeaderProps> = ({ currentLocale, onSelectLocale, o
             className="hover:text-blue-600 transition-colors whitespace-nowrap cursor-pointer"
           >
             {t.navHowItWorks}
-          </button>
-          <button
-            onClick={() => {
+          </a>
+          <a
+            href="#faq"
+            onClick={(e) => {
+              e.preventDefault();
               onNavigate('/');
               setTimeout(() => {
                 document.getElementById('faq')?.scrollIntoView({ behavior: 'smooth' });
@@ -97,7 +119,7 @@ export const Header: React.FC<HeaderProps> = ({ currentLocale, onSelectLocale, o
             className="hover:text-blue-600 transition-colors whitespace-nowrap cursor-pointer"
           >
             {t.navFaq}
-          </button>
+          </a>
         </nav>
 
         {/* Zone 3: Language Selector & Trust Badge */}

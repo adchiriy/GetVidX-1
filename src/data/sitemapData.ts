@@ -132,7 +132,6 @@ export function buildRobotsTxt(): string {
 User-agent: *
 Allow: /
 Disallow: /api/
-Disallow: /admin
 
 # Sitemap index
 Sitemap: ${BASE_PRODUCTION_DOMAIN}/sitemap.xml

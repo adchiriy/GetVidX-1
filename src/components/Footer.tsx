@@ -46,36 +46,52 @@ export const Footer: React.FC<FooterProps> = ({ currentLocale, onSelectLocale, o
             </h3>
             <ul className="space-y-2 text-xs sm:text-sm">
               <li>
-                <button
-                  onClick={() => onNavigate('/')}
-                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer"
+                <a
+                  href={currentLocale === 'en' ? '/' : `/${currentLocale}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate('/');
+                  }}
+                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer inline-block"
                 >
                   {t.navDownloader}
-                </button>
+                </a>
               </li>
               <li>
-                <button
-                  onClick={() => onNavigate('/twitter-to-mp3')}
-                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer"
+                <a
+                  href={currentLocale === 'en' ? '/twitter-to-mp3' : `/${currentLocale}/twitter-to-mp3`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate('/twitter-to-mp3');
+                  }}
+                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer inline-block"
                 >
                   {t.navMp3}
-                </button>
+                </a>
               </li>
               <li>
-                <button
-                  onClick={() => onNavigate('/twitter-gif-downloader')}
-                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer"
+                <a
+                  href={currentLocale === 'en' ? '/twitter-gif-downloader' : `/${currentLocale}/twitter-gif-downloader`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate('/twitter-gif-downloader');
+                  }}
+                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer inline-block"
                 >
                   {t.navGif}
-                </button>
+                </a>
               </li>
               <li>
-                <button
-                  onClick={() => onNavigate('/twitter-video-download-hd')}
-                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer"
+                <a
+                  href={currentLocale === 'en' ? '/twitter-video-download-hd' : `/${currentLocale}/twitter-video-download-hd`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate('/twitter-video-download-hd');
+                  }}
+                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer inline-block"
                 >
                   Twitter Video HD
-                </button>
+                </a>
               </li>
             </ul>
           </div>
@@ -87,44 +103,64 @@ export const Footer: React.FC<FooterProps> = ({ currentLocale, onSelectLocale, o
             </h3>
             <ul className="space-y-2 text-xs sm:text-sm">
               <li>
-                <button
-                  onClick={() => onNavigate('/terms')}
-                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer"
+                <a
+                  href={currentLocale === 'en' ? '/terms' : `/${currentLocale}/terms`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate('/terms');
+                  }}
+                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer inline-block"
                 >
                   {t.terms}
-                </button>
+                </a>
               </li>
               <li>
-                <button
-                  onClick={() => onNavigate('/privacy')}
-                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer"
+                <a
+                  href={currentLocale === 'en' ? '/privacy' : `/${currentLocale}/privacy`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate('/privacy');
+                  }}
+                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer inline-block"
                 >
                   {t.privacy}
-                </button>
+                </a>
               </li>
               <li>
-                <button
-                  onClick={() => onNavigate('/dmca')}
-                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer"
+                <a
+                  href={currentLocale === 'en' ? '/dmca' : `/${currentLocale}/dmca`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate('/dmca');
+                  }}
+                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer inline-block"
                 >
                   {t.dmca}
-                </button>
+                </a>
               </li>
               <li>
-                <button
-                  onClick={() => onNavigate('/about')}
-                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer"
+                <a
+                  href={currentLocale === 'en' ? '/about' : `/${currentLocale}/about`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate('/about');
+                  }}
+                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer inline-block"
                 >
                   {t.about}
-                </button>
+                </a>
               </li>
               <li>
-                <button
-                  onClick={() => onNavigate('/contact')}
-                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer"
+                <a
+                  href={currentLocale === 'en' ? '/contact' : `/${currentLocale}/contact`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate('/contact');
+                  }}
+                  className="hover:text-blue-600 transition-colors text-left rtl:text-right cursor-pointer inline-block"
                 >
                   {t.contact}
-                </button>
+                </a>
               </li>
             </ul>
           </div>
@@ -137,18 +173,23 @@ export const Footer: React.FC<FooterProps> = ({ currentLocale, onSelectLocale, o
             <div className="flex flex-wrap gap-1.5">
               {(Object.keys(LOCALES) as SupportedLocale[]).map((locKey) => {
                 const isSelected = locKey === currentLocale;
+                const langHref = locKey === 'en' ? '/' : `/${locKey}`;
                 return (
-                  <button
+                  <a
                     key={locKey}
-                    onClick={() => onSelectLocale(locKey)}
-                    className={`px-2.5 py-1 rounded text-xs transition-colors border cursor-pointer ${
+                    href={langHref}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      onSelectLocale(locKey);
+                    }}
+                    className={`px-2.5 py-1 rounded text-xs transition-colors border cursor-pointer inline-block ${
                       isSelected
                         ? 'bg-blue-600 text-white border-blue-600 font-bold'
                         : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:text-slate-900'
                     }`}
                   >
                     {LOCALES[locKey].nativeName}
-                  </button>
+                  </a>
                 );
               })}
             </div>
@@ -156,26 +197,38 @@ export const Footer: React.FC<FooterProps> = ({ currentLocale, onSelectLocale, o
             <div className="mt-4 pt-3 border-t border-slate-200/60">
               <span className="text-[11px] text-slate-400 block mb-1">Programmatic Guides:</span>
               <div className="flex flex-wrap gap-x-2 gap-y-1 text-xs">
-                <button
-                  onClick={() => onNavigate('/how-to-download-twitter-videos-iphone')}
+                <a
+                  href={currentLocale === 'en' ? '/how-to-download-twitter-videos-iphone' : `/${currentLocale}/how-to-download-twitter-videos-iphone`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate('/how-to-download-twitter-videos-iphone');
+                  }}
                   className="hover:text-blue-600 underline cursor-pointer"
                 >
                   iPhone Guide
-                </button>
+                </a>
                 <span className="text-slate-300">·</span>
-                <button
-                  onClick={() => onNavigate('/how-to-download-twitter-videos-android')}
+                <a
+                  href={currentLocale === 'en' ? '/how-to-download-twitter-videos-android' : `/${currentLocale}/how-to-download-twitter-videos-android`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate('/how-to-download-twitter-videos-android');
+                  }}
                   className="hover:text-blue-600 underline cursor-pointer"
                 >
                   Android Guide
-                </button>
+                </a>
                 <span className="text-slate-300">·</span>
-                <button
-                  onClick={() => onNavigate('/troubleshooting-twitter-video-downloads')}
+                <a
+                  href={currentLocale === 'en' ? '/troubleshooting-twitter-video-downloads' : `/${currentLocale}/troubleshooting-twitter-video-downloads`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate('/troubleshooting-twitter-video-downloads');
+                  }}
                   className="hover:text-blue-600 underline cursor-pointer"
                 >
                   Fix Errors
-                </button>
+                </a>
               </div>
             </div>
           </div>

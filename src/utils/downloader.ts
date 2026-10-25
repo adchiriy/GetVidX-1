@@ -186,21 +186,38 @@ export function buildMediaFormats(
     });
   }
 
-  // If we have at least one valid MP4 video, provide clean Audio extract (M4A / AAC)
+  // If we have at least one valid MP4 video, provide clean Audio extract (MP3 universal & M4A AAC)
   if (mp4Variants.length > 0) {
     const highestQuality = formats.find((f) => f.quality === '720p') || formats[0];
-    const audioFilename = `getvidx_${postId}_audio.m4a`;
+    const mp3Filename = `getvidx_${postId}_audio.mp3`;
+    const m4aFilename = `getvidx_${postId}_audio.m4a`;
+
+    // 1. Universal MP3 format (192 kbps)
     formats.push({
       id: 'format-mp3',
-      label: 'M4A Audio (AAC Stereo Track)',
-      quality: 'Audio Only',
-      resolution: 'Audio / 128 kbps',
+      label: 'MP3 Audio (192 kbps Stereo)',
+      quality: 'MP3 Audio',
+      resolution: 'Audio / 192 kbps',
       format: 'MP3',
-      filename: audioFilename,
+      filename: mp3Filename,
       directUrl: highestQuality.directUrl,
-      proxyUrl: `/api/live-download?url=${encodeURIComponent(highestQuality.directUrl)}&filename=${encodeURIComponent(audioFilename)}&format=m4a`,
+      proxyUrl: `/api/live-download?url=${encodeURIComponent(highestQuality.directUrl)}&filename=${encodeURIComponent(mp3Filename)}&format=mp3`,
       isAudioOnly: true,
-      sizeEstimate: durationSeconds ? `${((128000 * durationSeconds) / (8 * 1024 * 1024)).toFixed(1)} MB` : '~2.5 MB',
+      sizeEstimate: durationSeconds ? `${((192000 * durationSeconds) / (8 * 1024 * 1024)).toFixed(1)} MB` : '~2.5 MB',
+    });
+
+    // 2. M4A / AAC native audio track
+    formats.push({
+      id: 'format-m4a',
+      label: 'M4A Audio (AAC Stereo Track)',
+      quality: 'M4A Audio',
+      resolution: 'Audio / 192 kbps',
+      format: 'MP3',
+      filename: m4aFilename,
+      directUrl: highestQuality.directUrl,
+      proxyUrl: `/api/live-download?url=${encodeURIComponent(highestQuality.directUrl)}&filename=${encodeURIComponent(m4aFilename)}&format=m4a`,
+      isAudioOnly: true,
+      sizeEstimate: durationSeconds ? `${((192000 * durationSeconds) / (8 * 1024 * 1024)).toFixed(1)} MB` : '~2.5 MB',
     });
   }
 

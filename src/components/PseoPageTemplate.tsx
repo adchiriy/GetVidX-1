@@ -66,12 +66,16 @@ export const PseoPageTemplate: React.FC<PseoPageTemplateProps> = ({
     <div className="py-8 sm:py-12 max-w-4xl mx-auto px-4 sm:px-6">
       {/* Breadcrumb Navigation */}
       <nav aria-label="Breadcrumb" className="mb-6 flex items-center gap-2 text-xs text-slate-500">
-        <button
-          onClick={() => onNavigate('/')}
+        <a
+          href={currentLocale === 'en' ? '/' : `/${currentLocale}`}
+          onClick={(e) => {
+            e.preventDefault();
+            onNavigate('/');
+          }}
           className="hover:text-blue-600 transition-colors flex items-center gap-1 font-medium cursor-pointer"
         >
           <span>GetVidX</span>
-        </button>
+        </a>
         <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
         <span className="text-slate-900 font-semibold truncate max-w-xs">{h1}</span>
       </nav>
@@ -165,13 +169,17 @@ export const PseoPageTemplate: React.FC<PseoPageTemplateProps> = ({
           </h3>
           <div className="flex flex-wrap gap-2">
             {page.relatedSlugs.map((slug) => (
-              <button
+              <a
                 key={slug}
-                onClick={() => onNavigate(`/${slug}`)}
+                href={currentLocale === 'en' ? `/${slug}` : `/${currentLocale}/${slug}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  onNavigate(`/${slug}`);
+                }}
                 className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:border-blue-300 hover:text-blue-600 shadow-xs transition-colors cursor-pointer"
               >
                 {slug.replace(/-/g, ' ')}
-              </button>
+              </a>
             ))}
           </div>
         </div>
