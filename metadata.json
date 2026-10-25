@@ -1,0 +1,6 @@
+{
+  "name": "GetVidX - Twitter & X Video Downloader",
+  "description": "Fast, free online Twitter and X video downloader. Save MP4 videos in 1080p Full HD, GIFs, and MP3 audio with multi-language support and zero storage.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

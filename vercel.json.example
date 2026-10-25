@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://REPLACE_WITH_YOUR_BACKEND_HOST/api/$1"
+    },
+    {
+      "source": "/robots.txt",
+      "destination": "https://REPLACE_WITH_YOUR_BACKEND_HOST/robots.txt"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "https://REPLACE_WITH_YOUR_BACKEND_HOST/sitemap.xml"
+    },
+    {
+      "source": "/sitemap_1.xml",
+      "destination": "https://REPLACE_WITH_YOUR_BACKEND_HOST/sitemap_1.xml"
+    }
+  ]
+}
