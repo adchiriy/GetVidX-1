@@ -225,8 +225,11 @@ async function startServer() {
       const isLivePost = Boolean(parsed.isLive || parsed.isSpace || parsed.isBroadcast);
 
       // Fast, resilient concurrent resolvers for Twitter/X posts
+      const syndicationToken = ((Number(postId) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, '');
       const resolverConfigs = [
+        { url: `https://cdn.syndication.twimg.com/tweet-result?id=${postId}&token=${syndicationToken}`, ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
         { url: `https://api.fxtwitter.com/2/status/${postId}`, ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        { url: `https://api.fixupx.com/status/${postId}`, ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
         { url: `https://api.vxtwitter.com/Twitter/status/${postId}`, ua: 'TelegramBot (like TwitterBot)' },
         { url: `https://api.fxtwitter.com/${username}/status/${postId}`, ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
         { url: `https://api.vxtwitter.com/${username}/status/${postId}`, ua: 'Twitterbot/1.0' },
@@ -245,6 +248,7 @@ async function startServer() {
           });
           if (response.ok) {
             const json = await response.json();
+            if (json.tombstone) return null; // Post is deleted or suspended
             return json.status || json.tweet || json;
           }
         } catch (_) {
@@ -259,6 +263,8 @@ async function startServer() {
 
       let data: any = candidates.find((c) =>
         Boolean(
+          (Array.isArray(c?.mediaDetails) && c.mediaDetails.length > 0) ||
+          c?.video ||
           (c?.media && (c.media.videos?.length > 0 || c.media.photos?.length > 0)) ||
           (c?.media_extended && c.media_extended.length > 0) ||
           (c?.mediaURLs && c.mediaURLs.length > 0) ||
@@ -268,7 +274,7 @@ async function startServer() {
       );
 
       if (!data) {
-        data = candidates.find((c) => c && (c.text || c.id || c.conversationID || c.tweetID));
+        data = candidates.find((c) => c && (c.text || c.id || c.conversationID || c.tweetID || c.id_str));
       }
 
       // If data wasn't found through standard resolvers or if it is a Live/Space,
@@ -282,7 +288,14 @@ async function startServer() {
           );
           const m3u8 = ytFormats.find((f: any) => f.url?.includes('.m3u8'));
           const durationSec = ytData.duration || 0;
-          const isLiveStream = Boolean(ytData.is_live || isLivePost || m3u8);
+          const isLiveStream = Boolean(
+            isLivePost ||
+            ytData.is_live ||
+            ytData.was_live ||
+            ytData.extractor === 'twitter:broadcast' ||
+            ytData.extractor === 'twitter:space' ||
+            (mp4s.length === 0 && m3u8)
+          );
 
           const variants: any[] = [];
           for (const m of mp4s) {
@@ -302,7 +315,7 @@ async function startServer() {
           }
 
           if (variants.length > 0) {
-            const mappedFormats = buildMediaFormats(variants, durationSec, postId);
+            const mappedFormats = buildMediaFormats(variants, durationSec, postId, isLiveStream);
             const m = Math.floor(durationSec / 60);
             const s = Math.floor(durationSec % 60);
             const durationStr = durationSec > 0 ? `${m}:${s < 10 ? '0' : ''}${s}` : (isLiveStream ? 'Live / Replay' : '0:30');
@@ -340,7 +353,7 @@ async function startServer() {
         res.status(404).json({
           success: false,
           error: isLivePost
-            ? 'Cette diffusion en direct ou ce Space est introuvable ou n\'est plus accessible.'
+            ? 'This live broadcast or Space could not be found or has ended.'
             : 'Tweet could not be found or is protected.',
           errorCode: 'PRIVATE',
         });
@@ -354,6 +367,8 @@ async function startServer() {
       let quotedAuthor = '';
 
       const hasDirectVideos = Boolean(
+        (targetPost.mediaDetails && targetPost.mediaDetails.some((m: any) => m.type === 'video' || m.type === 'animated_gif')) ||
+        targetPost.video ||
         targetPost.media?.videos?.length ||
         targetPost.media?.all?.some((m: any) => m.type === 'video' || m.type === 'gif') ||
         targetPost.media_extended?.some((m: any) => m.type === 'video' || m.type === 'gif') ||
@@ -363,44 +378,117 @@ async function startServer() {
       if (!hasDirectVideos && data.quote) {
         const q = data.quote;
         const quoteHasMedia = Boolean(
+          (q.mediaDetails && q.mediaDetails.length > 0) ||
+          q.video ||
           q.media?.videos?.length ||
           q.media?.all?.some((m: any) => m.type === 'video' || m.type === 'gif') ||
           q.media_extended?.some((m: any) => m.type === 'video' || m.type === 'gif') ||
           (Array.isArray(q.mediaURLs) && q.mediaURLs.some((u: string) => u.includes('.mp4') || u.includes('video.twimg.com'))) ||
-          q.media?.photos?.length
+          q.media?.photos?.length ||
+          q.photos?.length
         );
         if (quoteHasMedia) {
           targetPost = q;
           isQuoted = true;
-          quotedAuthor = q.author?.name || q.user_name || q.author?.screen_name || 'Quoted Post';
+          quotedAuthor = q.user?.name || q.author?.name || q.user_name || q.author?.screen_name || 'Quoted Post';
         }
       }
 
       // 2. Extract video/gif media from targetPost
-      const mediaList =
-        (Array.isArray(targetPost.media?.videos) && targetPost.media.videos.length > 0 ? targetPost.media.videos : null) ||
-        (Array.isArray(targetPost.media?.all) && targetPost.media.all.length > 0 ? targetPost.media.all : null) ||
-        (Array.isArray(targetPost.media_extended) && targetPost.media_extended.length > 0 ? targetPost.media_extended : null) ||
-        [];
+      let videoMedia: any = null;
+      let isGif = false;
+      let durationSec = 30;
+      let thumbnailUrl = '';
+      const variants: Array<{ bitrate?: number; content_type?: string; container?: string; url: string }> = [];
 
-      let videoMedia = mediaList.find(
-        (m: { type: string; url: string }) => m.type === 'video' || m.type === 'gif'
-      ) || (targetPost.media?.videos && targetPost.media.videos[0]) || null;
+      // A. Check Twitter Syndication mediaDetails
+      if (Array.isArray(targetPost.mediaDetails) && targetPost.mediaDetails.length > 0) {
+        const vDetail = targetPost.mediaDetails.find((m: any) => m.type === 'video' || m.type === 'animated_gif');
+        if (vDetail) {
+          isGif = vDetail.type === 'animated_gif';
+          thumbnailUrl = vDetail.media_url_https || vDetail.url || '';
+          if (vDetail.video_info) {
+            durationSec = vDetail.video_info.duration_millis ? vDetail.video_info.duration_millis / 1000 : 30;
+            if (Array.isArray(vDetail.video_info.variants)) {
+              for (const v of vDetail.video_info.variants) {
+                if (v.url) {
+                  variants.push({
+                    url: v.url,
+                    content_type: v.content_type,
+                    bitrate: v.bitrate,
+                  });
+                }
+              }
+            }
+          }
+          videoMedia = { type: isGif ? 'gif' : 'video', variants, thumbnail_url: thumbnailUrl, duration: durationSec };
+        }
+      }
 
-      // Also check targetPost.mediaURLs for direct .mp4 if not found in mediaList
-      if (!videoMedia && Array.isArray(targetPost.mediaURLs)) {
-        const mp4Url = targetPost.mediaURLs.find((u: string) => u.includes('.mp4') || u.includes('video.twimg.com'));
-        if (mp4Url) {
-          videoMedia = {
-            type: 'video',
-            url: mp4Url,
-            thumbnail_url: targetPost.thumbnail_url || targetPost.mediaURLs[0],
-          };
+      // B. Check Twitter Syndication data.video
+      if (!videoMedia && targetPost.video) {
+        const v = targetPost.video;
+        isGif = v.contentType === 'gif';
+        thumbnailUrl = v.poster || '';
+        durationSec = v.durationMs ? v.durationMs / 1000 : 30;
+        if (Array.isArray(v.variants)) {
+          for (const item of v.variants) {
+            const src = item.src || item.url;
+            if (src) {
+              variants.push({
+                url: src,
+                content_type: item.type || item.content_type,
+                bitrate: item.bitrate,
+              });
+            }
+          }
+        }
+        videoMedia = { type: isGif ? 'gif' : 'video', variants, thumbnail_url: thumbnailUrl, duration: durationSec };
+      }
+
+      // C. Check FxTwitter / VxTwitter media structures
+      if (!videoMedia) {
+        const mediaList =
+          (Array.isArray(targetPost.media?.videos) && targetPost.media.videos.length > 0 ? targetPost.media.videos : null) ||
+          (Array.isArray(targetPost.media?.all) && targetPost.media.all.length > 0 ? targetPost.media.all : null) ||
+          (Array.isArray(targetPost.media_extended) && targetPost.media_extended.length > 0 ? targetPost.media_extended : null) ||
+          [];
+
+        const vm = mediaList.find((m: { type: string; url: string }) => m.type === 'video' || m.type === 'gif') ||
+          (targetPost.media?.videos && targetPost.media.videos[0]) ||
+          null;
+
+        if (vm) {
+          isGif = vm.type === 'gif' || (vm.url && vm.url.includes('tweet_video'));
+          durationSec = vm.duration || (vm.duration_millis ? vm.duration_millis / 1000 : 30);
+          thumbnailUrl = vm.thumbnail_url || '';
+          const rawVariants = Array.isArray(vm.formats) && vm.formats.length > 0
+            ? vm.formats
+            : Array.isArray(vm.variants) && vm.variants.length > 0
+            ? vm.variants
+            : [];
+          if (rawVariants.length > 0) {
+            variants.push(...rawVariants);
+          } else if (vm.url) {
+            variants.push({
+              url: vm.url,
+              content_type: 'video/mp4',
+              bitrate: 2176000,
+            });
+          }
+          videoMedia = { type: isGif ? 'gif' : 'video', variants, thumbnail_url: thumbnailUrl, duration: durationSec };
+        } else if (Array.isArray(targetPost.mediaURLs)) {
+          const mp4Url = targetPost.mediaURLs.find((u: string) => u.includes('.mp4') || u.includes('video.twimg.com'));
+          if (mp4Url) {
+            thumbnailUrl = targetPost.thumbnail_url || targetPost.mediaURLs[0];
+            variants.push({ url: mp4Url, content_type: 'video/mp4', bitrate: 2176000 });
+            videoMedia = { type: 'video', variants, thumbnail_url: thumbnailUrl, duration: 30 };
+          }
         }
       }
 
       // 3. If NO video/gif stream was found through resolvers, attempt extraction with yt-dlp
-      if (!videoMedia || (!videoMedia.url && (!videoMedia.formats || videoMedia.formats.length === 0) && (!videoMedia.variants || videoMedia.variants.length === 0))) {
+      if (!videoMedia || variants.length === 0) {
         const ytData = await resolveWithYtDlp(parsed.normalizedUrl || url);
         if (ytData && ytData.formats && ytData.formats.length > 0) {
           const ytFormats = ytData.formats || [];
@@ -409,11 +497,18 @@ async function startServer() {
           );
           const m3u8 = ytFormats.find((f: any) => f.url?.includes('.m3u8'));
           const durationSec = ytData.duration || 0;
-          const isLiveStream = Boolean(ytData.is_live || isLivePost || m3u8);
+          const isLiveStream = Boolean(
+            isLivePost ||
+            ytData.is_live ||
+            ytData.was_live ||
+            ytData.extractor === 'twitter:broadcast' ||
+            ytData.extractor === 'twitter:space' ||
+            (mp4s.length === 0 && m3u8)
+          );
 
-          const variants: any[] = [];
+          const ytVariants: any[] = [];
           for (const m of mp4s) {
-            variants.push({
+            ytVariants.push({
               url: m.url,
               content_type: 'video/mp4',
               container: 'mp4',
@@ -421,15 +516,15 @@ async function startServer() {
             });
           }
           if (m3u8) {
-            variants.push({
+            ytVariants.push({
               url: m3u8.url,
               content_type: 'application/x-mpegURL',
               container: 'm3u8',
             });
           }
 
-          if (variants.length > 0) {
-            const mappedFormats = buildMediaFormats(variants, durationSec, postId);
+          if (ytVariants.length > 0) {
+            const mappedFormats = buildMediaFormats(ytVariants, durationSec, postId, isLiveStream);
             const m = Math.floor(durationSec / 60);
             const s = Math.floor(durationSec % 60);
             const durationStr = durationSec > 0 ? `${m}:${s < 10 ? '0' : ''}${s}` : (isLiveStream ? 'Live / Replay' : '0:30');
@@ -442,9 +537,9 @@ async function startServer() {
               success: true,
               result: {
                 tweetId: postId,
-                username: ytData.uploader_id || ytData.uploader || targetPost.author?.screen_name || parsed.username || 'twitter_user',
-                authorName: ytData.uploader || ytData.channel || targetPost.author?.name || 'Twitter Creator',
-                authorAvatar: targetPost.author?.avatar_url || targetPost.user_profile_image_url,
+                username: ytData.uploader_id || ytData.uploader || targetPost.user?.screen_name || targetPost.author?.screen_name || parsed.username || 'twitter_user',
+                authorName: ytData.uploader || ytData.channel || targetPost.user?.name || targetPost.author?.name || 'Twitter Creator',
+                authorAvatar: targetPost.user?.profile_image_url_https || targetPost.author?.avatar_url || targetPost.user_profile_image_url,
                 tweetText: ytData.title || targetPost.text || '',
                 thumbnailUrl: ytData.thumbnail || targetPost.thumbnail_url,
                 duration: durationStr,
@@ -463,6 +558,8 @@ async function startServer() {
         }
 
         const rawPhotos =
+          (Array.isArray(targetPost.mediaDetails) ? targetPost.mediaDetails.filter((m: any) => m.type === 'photo').map((m: any) => ({ url: m.media_url_https || m.url, width: m.sizes?.large?.w, height: m.sizes?.large?.h })) : null) ||
+          (Array.isArray(targetPost.photos) && targetPost.photos.length > 0 ? targetPost.photos.map((p: any) => ({ url: p.url || p.media_url_https })) : null) ||
           (Array.isArray(targetPost.media?.photos) && targetPost.media.photos.length > 0 ? targetPost.media.photos : null) ||
           (Array.isArray(data.media?.photos) && data.media.photos.length > 0 ? data.media.photos : null) ||
           (Array.isArray(targetPost.media?.all) ? targetPost.media.all.filter((m: any) => m.type === 'photo') : null) ||
@@ -476,9 +573,9 @@ async function startServer() {
             success: true,
             result: {
               tweetId: postId,
-              username: targetPost.user_screen_name || targetPost.author?.screen_name || parsed.username || 'twitter_user',
-              authorName: targetPost.user_name || targetPost.author?.name || 'Twitter Creator',
-              authorAvatar: targetPost.user_profile_image_url || targetPost.author?.avatar_url,
+              username: targetPost.user?.screen_name || targetPost.user_screen_name || targetPost.author?.screen_name || parsed.username || 'twitter_user',
+              authorName: targetPost.user?.name || targetPost.user_name || targetPost.author?.name || 'Twitter Creator',
+              authorAvatar: targetPost.user?.profile_image_url_https || targetPost.user_profile_image_url || targetPost.author?.avatar_url,
               tweetText: targetPost.text || (targetPost.raw_text?.text ? targetPost.raw_text.text : data.text || ''),
               thumbnailUrl: rawPhotos[0].url,
               duration: `${rawPhotos.length} Photo${rawPhotos.length > 1 ? 's' : ''}`,
@@ -506,31 +603,19 @@ async function startServer() {
         return;
       }
 
-      const isGif = videoMedia.type === 'gif' || (videoMedia.url && videoMedia.url.includes('tweet_video'));
-      const durationSec = videoMedia.duration || (videoMedia.duration_millis ? videoMedia.duration_millis / 1000 : 30);
+      // Check if genuinely live / space
+      const hasMp4 = variants.some((v) =>
+        (v.container === 'mp4' || v.content_type === 'video/mp4' || v.url?.includes('.mp4')) &&
+        !v.url?.includes('.m3u8') &&
+        Boolean(v.url)
+      );
+      const isGenuineLive = Boolean(isLivePost || (!hasMp4 && variants.some((v) => v.url?.includes('.m3u8'))));
 
-      const rawVariants = Array.isArray(videoMedia.formats) && videoMedia.formats.length > 0
-        ? videoMedia.formats
-        : Array.isArray(videoMedia.variants) && videoMedia.variants.length > 0
-        ? videoMedia.variants
-        : [];
-
-      const variants: Array<{ bitrate?: number; content_type?: string; container?: string; url: string }> = [];
-      if (rawVariants.length > 0) {
-        variants.push(...rawVariants);
-      } else if (videoMedia.url) {
-        variants.push({
-          url: videoMedia.url,
-          content_type: 'video/mp4',
-          bitrate: 2176000,
-        });
-      }
-
-      const formats = buildMediaFormats(variants, durationSec, postId);
+      const formats = buildMediaFormats(variants, durationSec, postId, isGenuineLive);
 
       const m = Math.floor(durationSec / 60);
       const s = Math.floor(durationSec % 60);
-      const durationStr = durationSec > 0 ? `${m}:${s < 10 ? '0' : ''}${s}` : 'Live';
+      const durationStr = durationSec > 0 ? `${m}:${s < 10 ? '0' : ''}${s}` : (isGenuineLive ? 'Live' : '0:30');
 
       // Pick preview video URL (preferably 720p or standard MP4 for seamless browser preview)
       const previewFormat = formats.find((f) => f.format === 'MP4' && (f.quality === '720p' || f.quality === '480p')) ||
@@ -541,21 +626,21 @@ async function startServer() {
         success: true,
         result: {
           tweetId: postId,
-          username: targetPost.user_screen_name || targetPost.author?.screen_name || data.author?.screen_name || parsed.username || 'twitter_user',
-          authorName: targetPost.user_name || targetPost.author?.name || data.author?.name || 'Twitter Creator',
-          authorAvatar: targetPost.user_profile_image_url || targetPost.author?.avatar_url || data.author?.avatar_url,
+          username: targetPost.user?.screen_name || targetPost.user_screen_name || targetPost.author?.screen_name || data.author?.screen_name || parsed.username || 'twitter_user',
+          authorName: targetPost.user?.name || targetPost.user_name || targetPost.author?.name || data.author?.name || 'Twitter Creator',
+          authorAvatar: targetPost.user?.profile_image_url_https || targetPost.user_profile_image_url || targetPost.author?.avatar_url || data.author?.avatar_url,
           tweetText: targetPost.text || (targetPost.raw_text?.text ? targetPost.raw_text.text : data.text || ''),
-          thumbnailUrl: videoMedia.thumbnail_url || (variants[0]?.url ? undefined : undefined),
+          thumbnailUrl: thumbnailUrl || videoMedia.thumbnail_url || (variants[0]?.url ? undefined : undefined),
           duration: durationStr,
           isVideo: !isGif,
           isGif,
-          isLive: isLivePost || Boolean(variants.some((v) => v.url?.includes('.m3u8'))),
+          isLive: isGenuineLive,
           isSpace: Boolean(parsed.isSpace),
           isBroadcast: Boolean(parsed.isBroadcast),
           isQuoted,
           quotedAuthor: isQuoted ? quotedAuthor : undefined,
           streamUrl: variants.find((v) => v.url?.includes('.m3u8'))?.url,
-          previewUrl: previewFormat?.directUrl || videoMedia.url,
+          previewUrl: previewFormat?.directUrl || videoMedia.variants?.[0]?.url || videoMedia.url,
           formats,
         },
       });
@@ -712,14 +797,31 @@ async function startServer() {
 
       readableStream.pipe(res);
 
-      readableStream.on('error', (streamErr) => {
+      readableStream.on('error', (streamErr: any) => {
+        // Normal client abort / navigation / disconnect should not be logged as upstream failure
+        if (
+          abortController.signal.aborted ||
+          req.destroyed ||
+          res.destroyed ||
+          streamErr?.name === 'AbortError' ||
+          streamErr?.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+          streamErr?.message?.includes('aborted')
+        ) {
+          return;
+        }
         console.error('Upstream stream error:', streamErr);
         if (!res.headersSent) {
           res.status(502).json({ error: 'Stream interrupted from media provider.' });
         }
       });
     } catch (err: any) {
-      if (err.name === 'AbortError') {
+      if (
+        req.destroyed ||
+        res.destroyed ||
+        err?.name === 'AbortError' ||
+        err?.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+        err?.message?.includes('aborted')
+      ) {
         return;
       }
       console.error('Proxy download handler error:', err);
@@ -920,8 +1022,11 @@ async function startServer() {
         ffmpegErrorOutput += data.toString();
       });
 
-      ffmpeg.on('error', (procErr) => {
+      ffmpeg.on('error', (procErr: any) => {
         releaseFfmpegSlot();
+        if (req.destroyed || res.destroyed || procErr?.code === 'ERR_STREAM_PREMATURE_CLOSE') {
+          return;
+        }
         console.error('FFmpeg process error:', procErr);
         if (!res.headersSent && !hasData) {
           res.status(500).json({ error: 'Failed to start media converter.' });
@@ -930,7 +1035,7 @@ async function startServer() {
 
       ffmpeg.on('close', (code) => {
         releaseFfmpegSlot();
-        if (code !== 0 && !hasData) {
+        if (code !== 0 && !hasData && !req.destroyed && !res.destroyed) {
           console.warn(`FFmpeg closed with code ${code}: ${ffmpegErrorOutput.trim()}`);
           if (!res.headersSent) {
             // Visitor-facing response: clean sanitized message without exposing internal stderr
@@ -952,6 +1057,9 @@ async function startServer() {
         } catch (_) {}
       });
     } catch (err: any) {
+      if (req.destroyed || res.destroyed || err?.name === 'AbortError' || err?.message?.includes('aborted')) {
+        return;
+      }
       console.error('Live download error:', err);
       if (!res.headersSent) {
         res.status(500).json({ error: 'Internal server error while initiating live stream download.' });

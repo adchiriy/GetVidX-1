@@ -60,7 +60,7 @@ export const DownloadResult: React.FC<DownloadResultProps> = ({
 
   const displayedFormats = candidateFormats.length > 0 ? candidateFormats : result.formats;
   const isFallbackFilter = candidateFormats.length === 0 && result.formats.length > 0;
-  const hasLiveStream = Boolean(result.isLive || result.isSpace || result.isBroadcast || result.formats.some((f) => f.format === 'M3U8'));
+  const hasLiveStream = Boolean(result.isLive || result.isSpace || result.isBroadcast);
   const m3u8Format = result.formats.find((f) => f.format === 'M3U8' || f.isLiveStream);
   const playableVideoUrl = !result.isPhoto
     ? (result.previewUrl || result.formats.find((f) => f.format === 'MP4')?.directUrl || m3u8Format?.directUrl)

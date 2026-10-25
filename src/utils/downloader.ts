@@ -98,7 +98,8 @@ function formatDuration(seconds: number): string {
 export function buildMediaFormats(
   variants: Array<{ bitrate?: number; content_type?: string; container?: string; url: string }>,
   durationSeconds: number,
-  postId: string
+  postId: string,
+  isGenuineLive = false
 ): MediaFormat[] {
   const formats: MediaFormat[] = [];
   const seenResolutions = new Set<string>();
@@ -212,7 +213,7 @@ export function buildMediaFormats(
       label: 'M4A Audio (AAC Stereo Track)',
       quality: 'M4A Audio',
       resolution: 'Audio / 192 kbps',
-      format: 'MP3',
+      format: 'M4A',
       filename: m4aFilename,
       directUrl: highestQuality.directUrl,
       proxyUrl: `/api/live-download?url=${encodeURIComponent(highestQuality.directUrl)}&filename=${encodeURIComponent(m4aFilename)}&format=m4a`,
@@ -221,8 +222,8 @@ export function buildMediaFormats(
     });
   }
 
-  // If there is an M3U8 live stream or if it is a live broadcast/space
-  if (m3u8Variant?.url) {
+  // Only for genuine live broadcasts, Twitter Spaces, or when no standalone MP4 files exist
+  if ((isGenuineLive || mp4Variants.length === 0) && m3u8Variant?.url) {
     const liveMp4Filename = `getvidx_${postId}_live.mp4`;
     const spaceAudioFilename = `getvidx_${postId}_live_audio.mp3`;
     const m3u8Filename = `getvidx_${postId}_stream.m3u8`;
@@ -301,7 +302,7 @@ export async function analyzeTweet(rawUrl: string): Promise<DownloaderResponse> 
       body: JSON.stringify({ url: parsed.normalizedUrl, postId }),
     });
 
-    if (apiResponse.ok) {
+    try {
       const data = await apiResponse.json();
       if (data.success && data.result) {
         return { success: true, result: data.result };
@@ -309,6 +310,8 @@ export async function analyzeTweet(rawUrl: string): Promise<DownloaderResponse> 
       if (data.errorCode) {
         return { success: false, error: data.error, errorCode: data.errorCode };
       }
+    } catch (_) {
+      // Body not JSON
     }
   } catch (err) {
     console.warn('Backend /api/analyze unavailable, attempting client syndication fallback:', err);
