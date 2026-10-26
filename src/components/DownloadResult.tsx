@@ -130,9 +130,10 @@ export const DownloadResult: React.FC<DownloadResultProps> = ({
 
   /**
    * Resilient media download trigger.
-   * Performs real stream fetching, catches any upstream HTTP errors before saving,
-   * generates a verified typed binary Blob to ensure the file is complete and playable,
-   * and provides graceful fallback to direct link streaming.
+   * 1. Attempts proxy-download stream first (server-side).
+   * 2. If proxy returns 404/5xx (e.g. on static Vercel deployments), fetches directUrl via CORS (Twitter CDN allows access-control-allow-origin: *).
+   * 3. Generates a typed binary Blob to guarantee file integrity and immediate playback.
+   * 4. If fetch fails completely, triggers browser download directly on directUrl (never broken proxyUrl).
    */
   const handleDownload = async (e: React.MouseEvent, fmt: MediaFormat) => {
     e.preventDefault();
@@ -141,34 +142,7 @@ export const DownloadResult: React.FC<DownloadResultProps> = ({
     setDownloadingId(fmt.id);
     setDownloadError(null);
 
-    try {
-      const response = await fetch(fmt.proxyUrl);
-
-      if (!response.ok) {
-        let errorMsg = 'Failed to download media file. The provider may have expired this link.';
-        try {
-          const errData = await response.json();
-          if (errData.error) errorMsg = errData.error;
-        } catch (_) {}
-        throw new Error(errorMsg);
-      }
-
-      const contentType = response.headers.get('content-type') || (
-        fmt.format === 'MP3'
-          ? 'audio/mpeg'
-          : fmt.format === 'M4A'
-          ? 'audio/mp4'
-          : fmt.format === 'JPG'
-          ? 'image/jpeg'
-          : 'video/mp4'
-      );
-
-      const blob = await response.blob();
-      if (blob.size === 0) {
-        throw new Error('Downloaded media file was empty. Please try another quality option.');
-      }
-
-      // Explicitly typed blob ensures mobile & desktop video players recognize format
+    const triggerBlobSave = (blob: Blob, contentType: string) => {
       const typedBlob = new Blob([blob], { type: contentType });
       const blobUrl = window.URL.createObjectURL(typedBlob);
 
@@ -178,22 +152,84 @@ export const DownloadResult: React.FC<DownloadResultProps> = ({
       downloadLink.style.display = 'none';
       document.body.appendChild(downloadLink);
       downloadLink.click();
-      document.body.removeChild(downloadLink);
 
       setTimeout(() => {
+        if (document.body.contains(downloadLink)) {
+          document.body.removeChild(downloadLink);
+        }
         window.URL.revokeObjectURL(blobUrl);
-      }, 45000);
+      }, 60000);
+    };
+
+    const triggerDirectFallback = () => {
+      const fallbackUrl = fmt.directUrl || fmt.proxyUrl;
+      const fallback = document.createElement('a');
+      fallback.href = fallbackUrl;
+      fallback.download = fmt.filename;
+      fallback.target = '_blank';
+      fallback.rel = 'noopener noreferrer';
+      fallback.style.display = 'none';
+      document.body.appendChild(fallback);
+      fallback.click();
+      setTimeout(() => {
+        if (document.body.contains(fallback)) {
+          document.body.removeChild(fallback);
+        }
+      }, 5000);
+    };
+
+    try {
+      let response: Response | null = null;
+
+      // 1. Attempt backend proxy download route first
+      if (fmt.proxyUrl) {
+        try {
+          const res = await fetch(fmt.proxyUrl);
+          if (res.ok) {
+            response = res;
+          }
+        } catch (_) {
+          // Proxy endpoint unavailable or network error
+        }
+      }
+
+      // 2. If proxy is unavailable or returned 404/5xx (e.g. Vercel frontend without backend),
+      // fetch directly from Twitter CDN (video.twimg.com has access-control-allow-origin: *)
+      if (!response && fmt.directUrl) {
+        try {
+          const directRes = await fetch(fmt.directUrl, { mode: 'cors' });
+          if (directRes.ok) {
+            response = directRes;
+          }
+        } catch (corsErr) {
+          console.warn('Direct CDN fetch failed or CORS prevented:', corsErr);
+        }
+      }
+
+      if (response && response.ok) {
+        const contentType = response.headers.get('content-type') || (
+          fmt.format === 'MP3'
+            ? 'audio/mpeg'
+            : fmt.format === 'M4A'
+            ? 'audio/mp4'
+            : fmt.format === 'JPG'
+            ? 'image/jpeg'
+            : 'video/mp4'
+        );
+
+        const blob = await response.blob();
+        if (blob.size > 0) {
+          triggerBlobSave(blob, contentType);
+          return;
+        }
+      }
+
+      // 3. If binary streaming was not possible, trigger fallback on real media URL
+      triggerDirectFallback();
     } catch (err: any) {
-      console.warn('Direct stream fetch failed, falling back to direct anchor:', err);
+      console.warn('Download handler error, triggering direct fallback:', err);
       try {
-        const fallback = document.createElement('a');
-        fallback.href = fmt.proxyUrl;
-        fallback.download = fmt.filename;
-        fallback.target = '_blank';
-        fallback.rel = 'noopener noreferrer';
-        document.body.appendChild(fallback);
-        fallback.click();
-        document.body.removeChild(fallback);
+        triggerDirectFallback();
       } catch (_) {
         setDownloadError(err?.message || 'Error occurred while saving file.');
       }
