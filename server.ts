@@ -45,6 +45,7 @@ const ALLOWED_MEDIA_HOSTS = new Set([
   'twitter.com',
   'x.com',
   'pscp.tv',
+  'giphy.com',
 ]);
 
 /**
@@ -174,10 +175,9 @@ async function startServer() {
   let activeFfmpegCount = 0;
   const MAX_CONCURRENT_FFMPEG = 8;
 
-  // Security Headers
+  // Security Headers (no restrictive X-Frame-Options to allow preview within iframes)
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     next();
   });

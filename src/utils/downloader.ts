@@ -5,7 +5,7 @@ export interface MediaFormat {
   label: string;
   quality: string;
   resolution: string;
-  format: 'MP4' | 'MP3' | 'GIF' | 'M3U8' | 'JPG';
+  format: 'MP4' | 'MP3' | 'M4A' | 'GIF' | 'M3U8' | 'JPG';
   filename: string;
   directUrl: string;
   proxyUrl: string;
@@ -188,7 +188,7 @@ export function buildMediaFormats(
   }
 
   // If we have at least one valid MP4 video, provide clean Audio extract (MP3 universal & M4A AAC)
-  if (mp4Variants.length > 0) {
+  if (mp4Variants.length > 0 && formats.length > 0) {
     const highestQuality = formats.find((f) => f.quality === '720p') || formats[0];
     const mp3Filename = `getvidx_${postId}_audio.mp3`;
     const m4aFilename = `getvidx_${postId}_audio.m4a`;
@@ -307,7 +307,8 @@ export async function analyzeTweet(rawUrl: string): Promise<DownloaderResponse> 
       if (data.success && data.result) {
         return { success: true, result: data.result };
       }
-      if (data.errorCode) {
+      // If server returned an explicit format error, return it immediately without redundant fallback
+      if (data.errorCode === 'INVALID_DOMAIN' || data.errorCode === 'EMPTY_URL' || data.errorCode === 'INVALID_ID') {
         return { success: false, error: data.error, errorCode: data.errorCode };
       }
     } catch (_) {
@@ -317,13 +318,16 @@ export async function analyzeTweet(rawUrl: string): Promise<DownloaderResponse> 
     console.warn('Backend /api/analyze unavailable, attempting client syndication fallback:', err);
   }
 
-  // 2. Client-side fallback via public Twitter resolvers
+  // 2. Client-side fallback via public Twitter resolvers (Syndication CDN, FixupX, FxTwitter, VxTwitter)
   try {
+    const syndicationToken = ((Number(postId) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, '');
     const endpoints = [
+      `https://cdn.syndication.twimg.com/tweet-result?id=${postId}&token=${syndicationToken}`,
       `https://api.fxtwitter.com/2/status/${postId}`,
+      `https://api.fixupx.com/status/${postId}`,
       `https://api.fxtwitter.com/${username}/status/${postId}`,
-      `https://api.vxtwitter.com/${username}/status/${postId}`,
       `https://api.vxtwitter.com/Twitter/status/${postId}`,
+      `https://api.vxtwitter.com/${username}/status/${postId}`,
     ];
 
     let data: any = null;
@@ -333,8 +337,18 @@ export async function analyzeTweet(rawUrl: string): Promise<DownloaderResponse> 
         const res = await fetch(ep);
         if (res.ok) {
           const json = await res.json();
+          if (json.tombstone) continue;
           const candidate = json.status || json.tweet || json;
-          if (candidate && (candidate.media || candidate.media_extended || candidate.mediaURLs)) {
+          const hasMediaCandidate = Boolean(
+            (Array.isArray(candidate?.mediaDetails) && candidate.mediaDetails.length > 0) ||
+            candidate?.video ||
+            (candidate?.media && (candidate.media.videos?.length > 0 || candidate.media.all?.length > 0 || candidate.media.photos?.length > 0)) ||
+            (Array.isArray(candidate?.media_extended) && candidate.media_extended.length > 0) ||
+            (Array.isArray(candidate?.mediaURLs) && candidate.mediaURLs.length > 0) ||
+            candidate?.embed_card ||
+            candidate?.quote
+          );
+          if (candidate && hasMediaCandidate) {
             data = candidate;
             break;
           }
@@ -343,63 +357,207 @@ export async function analyzeTweet(rawUrl: string): Promise<DownloaderResponse> 
     }
 
     if (data) {
-      const mediaList =
-        (Array.isArray(data.media?.videos) && data.media.videos.length > 0 ? data.media.videos : null) ||
-        (Array.isArray(data.media?.all) && data.media.all.length > 0 ? data.media.all : null) ||
-        (Array.isArray(data.media_extended) && data.media_extended.length > 0 ? data.media_extended : null) ||
-        [];
+      // Check if Quote Tweet contains the media
+      let targetPost = data;
+      let isQuoted = false;
+      let quotedAuthor = '';
 
-      const videoMedia =
-        mediaList.find((m: { type: string; url: string }) => m.type === 'video' || m.type === 'gif') ||
-        (data.media?.videos && data.media.videos[0]) ||
-        null;
+      const hasDirect = Boolean(
+        (Array.isArray(targetPost?.mediaDetails) && targetPost.mediaDetails.length > 0) ||
+        targetPost?.video ||
+        (targetPost?.media && (targetPost.media.videos?.length > 0 || targetPost.media.all?.length > 0)) ||
+        (Array.isArray(targetPost?.media_extended) && targetPost.media_extended.length > 0) ||
+        (Array.isArray(targetPost?.mediaURLs) && targetPost.mediaURLs.some((u: string) => u.includes('.mp4') || u.includes('video.twimg.com')))
+      );
 
-      if (videoMedia && (videoMedia.url || (videoMedia.formats && videoMedia.formats.length > 0) || (videoMedia.variants && videoMedia.variants.length > 0))) {
-        const isGif = videoMedia.type === 'gif' || (videoMedia.url && videoMedia.url.includes('tweet_video'));
-        const durationSec = videoMedia.duration || (videoMedia.duration_millis ? videoMedia.duration_millis / 1000 : 30);
+      if (!hasDirect && data.quote) {
+        const q = data.quote;
+        targetPost = q;
+        isQuoted = true;
+        quotedAuthor = q.user?.name || q.author?.name || q.user_name || q.author?.screen_name || 'Quoted Post';
+      }
 
-        const rawVariants = Array.isArray(videoMedia.formats) && videoMedia.formats.length > 0
-          ? videoMedia.formats
-          : Array.isArray(videoMedia.variants) && videoMedia.variants.length > 0
-          ? videoMedia.variants
-          : [];
+      // Extract media details by checking all upstream schemas
+      let rawType = 'video';
+      let durationSec = 30;
+      let thumbnailUrl = '';
+      const variants: Array<{ bitrate?: number; content_type?: string; container?: string; url: string }> = [];
 
-        const variants: Array<{ bitrate?: number; content_type?: string; container?: string; url: string }> = [];
-        if (rawVariants.length > 0) {
-          variants.push(...rawVariants);
-        } else if (videoMedia.url) {
-          variants.push({
-            url: videoMedia.url,
-            content_type: 'video/mp4',
-            container: 'mp4',
-            bitrate: 2176000,
-          });
+      // A. Check Twitter Syndication mediaDetails
+      if (Array.isArray(targetPost.mediaDetails) && targetPost.mediaDetails.length > 0) {
+        const mediaItem = targetPost.mediaDetails.find((m: any) =>
+          m.type === 'video' || m.type === 'animated_gif' || m.type === 'live' || m.type === 'hls' || m.type === 'broadcast'
+        );
+        if (mediaItem) {
+          rawType = mediaItem.type;
+          thumbnailUrl = mediaItem.media_url_https || mediaItem.url || '';
+          if (mediaItem.video_info) {
+            durationSec = mediaItem.video_info.duration_millis ? mediaItem.video_info.duration_millis / 1000 : 30;
+            if (Array.isArray(mediaItem.video_info.variants)) {
+              for (const v of mediaItem.video_info.variants) {
+                if (v.url) {
+                  variants.push({
+                    url: v.url,
+                    content_type: v.content_type,
+                    bitrate: v.bitrate,
+                  });
+                }
+              }
+            }
+          }
         }
+      }
 
-        const formats = buildMediaFormats(variants, durationSec, postId);
+      // B. Check Twitter Syndication data.video
+      if (variants.length === 0 && targetPost.video) {
+        const v = targetPost.video;
+        rawType = v.contentType === 'gif' ? 'animated_gif' : (v.contentType || 'video');
+        thumbnailUrl = v.poster || '';
+        durationSec = v.durationMs ? v.durationMs / 1000 : 30;
+        if (Array.isArray(v.variants)) {
+          for (const item of v.variants) {
+            const src = item.src || item.url;
+            if (src) {
+              variants.push({
+                url: src,
+                content_type: item.type || item.content_type,
+                bitrate: item.bitrate,
+              });
+            }
+          }
+        }
+      }
+
+      // C. Check FxTwitter / VxTwitter media structures
+      if (variants.length === 0) {
+        const mediaList =
+          (Array.isArray(targetPost.media?.videos) && targetPost.media.videos.length > 0 ? targetPost.media.videos : null) ||
+          (Array.isArray(targetPost.media?.all) && targetPost.media.all.length > 0 ? targetPost.media.all : null) ||
+          (Array.isArray(targetPost.media_extended) && targetPost.media_extended.length > 0 ? targetPost.media_extended : null) ||
+          [];
+
+        const vm = mediaList.find((m: { type: string; url?: string }) =>
+          m.type === 'video' || m.type === 'gif' || m.type === 'animated_gif' || m.type === 'live' || m.type === 'hls' || m.type === 'broadcast'
+        ) || (targetPost.media?.videos && targetPost.media.videos[0]) || null;
+
+        if (vm) {
+          rawType = vm.type;
+          durationSec = vm.duration || (vm.duration_millis ? vm.duration_millis / 1000 : 30);
+          thumbnailUrl = vm.thumbnail_url || '';
+          const rawVariants = Array.isArray(vm.formats) && vm.formats.length > 0
+            ? vm.formats
+            : Array.isArray(vm.variants) && vm.variants.length > 0
+            ? vm.variants
+            : [];
+          if (rawVariants.length > 0) {
+            variants.push(...rawVariants);
+          } else if (vm.url) {
+            variants.push({
+              url: vm.url,
+              content_type: 'video/mp4',
+              container: 'mp4',
+              bitrate: 2176000,
+            });
+          }
+        } else if (Array.isArray(targetPost.mediaURLs)) {
+          const mp4Url = targetPost.mediaURLs.find((u: string) => u.includes('.mp4') || u.includes('video.twimg.com'));
+          if (mp4Url) {
+            rawType = 'video';
+            thumbnailUrl = targetPost.thumbnail_url || targetPost.mediaURLs[0];
+            variants.push({ url: mp4Url, content_type: 'video/mp4', container: 'mp4', bitrate: 2176000 });
+          }
+        }
+      }
+
+      // If variants are found, classify and build formats
+      if (variants.length > 0) {
+        const isGif = rawType === 'animated_gif' || rawType === 'gif';
+        const isLiveOrHlsType = rawType === 'live' || rawType === 'hls' || rawType === 'broadcast';
+
+        const hasMp4 = variants.some((v) =>
+          (v.container === 'mp4' || v.content_type === 'video/mp4' || v.url?.includes('.mp4')) &&
+          !v.url?.includes('.m3u8') &&
+          Boolean(v.url)
+        );
+
+        // A post is ONLY genuinely live if explicitly a live/hls/broadcast post, or if no MP4 exists and only m3u8 exists
+        const isGenuineLive = Boolean(
+          parsed.isLive ||
+          parsed.isSpace ||
+          parsed.isBroadcast ||
+          isLiveOrHlsType ||
+          (!hasMp4 && variants.some((v) => v.url?.includes('.m3u8')))
+        );
+
+        const formats = buildMediaFormats(variants, durationSec, postId, isGenuineLive);
+
+        const previewFormat = formats.find((f) => f.format === 'MP4' && (f.quality === '720p' || f.quality === '480p')) ||
+          formats.find((f) => f.format === 'MP4') ||
+          formats[0];
 
         return {
           success: true,
           result: {
             tweetId: postId,
-            username: data.user_screen_name || data.author?.screen_name || parsed.username || 'twitter_user',
-            authorName: data.user_name || data.author?.name || 'Twitter Creator',
-            authorAvatar: data.user_profile_image_url || data.author?.avatar_url,
-            tweetText: data.text || (data.raw_text?.text ? data.raw_text.text : ''),
-            thumbnailUrl: videoMedia.thumbnail_url || (videoMedia.variants && videoMedia.variants[0]?.url),
-            duration: formatDuration(durationSec),
+            username: targetPost.user?.screen_name || targetPost.user_screen_name || targetPost.author?.screen_name || data.author?.screen_name || parsed.username || 'twitter_user',
+            authorName: targetPost.user?.name || targetPost.user_name || targetPost.author?.name || data.author?.name || 'Twitter Creator',
+            authorAvatar: targetPost.user?.profile_image_url_https || targetPost.user_profile_image_url || targetPost.author?.avatar_url || data.author?.avatar_url,
+            tweetText: targetPost.text || (targetPost.raw_text?.text ? targetPost.raw_text.text : data.text || ''),
+            thumbnailUrl: thumbnailUrl || (variants[0]?.url ? undefined : undefined),
+            duration: formatDuration(durationSec) || (isGenuineLive ? 'Live' : '0:30'),
             isVideo: !isGif,
             isGif,
+            isLive: isGenuineLive,
+            isSpace: Boolean(parsed.isSpace),
+            isBroadcast: Boolean(parsed.isBroadcast || rawType === 'broadcast'),
+            isQuoted,
+            quotedAuthor: isQuoted ? quotedAuthor : undefined,
+            streamUrl: variants.find((v) => v.url?.includes('.m3u8'))?.url,
+            previewUrl: previewFormat?.directUrl || variants[0]?.url,
             formats,
           },
         };
-      } else {
+      }
+
+      // Check for Photos if no video was found
+      const rawPhotos =
+        (Array.isArray(targetPost.mediaDetails) ? targetPost.mediaDetails.filter((m: any) => m.type === 'photo').map((m: any) => ({ url: m.media_url_https || m.url, width: m.sizes?.large?.w, height: m.sizes?.large?.h })) : null) ||
+        (Array.isArray(targetPost.photos) && targetPost.photos.length > 0 ? targetPost.photos.map((p: any) => ({ url: p.url || p.media_url_https })) : null) ||
+        (Array.isArray(targetPost.media?.photos) && targetPost.media.photos.length > 0 ? targetPost.media.photos : null) ||
+        (Array.isArray(data.media?.photos) && data.media.photos.length > 0 ? data.media.photos : null) ||
+        (Array.isArray(targetPost.media?.all) ? targetPost.media.all.filter((m: any) => m.type === 'photo') : null) ||
+        (Array.isArray(targetPost.media_extended) ? targetPost.media_extended.filter((m: any) => m.type === 'image') : null) ||
+        [];
+
+      if (rawPhotos.length > 0) {
+        const photoFormats = buildPhotoFormats(rawPhotos, postId);
         return {
-          success: false,
-          error: 'No video stream was found in this tweet.',
-          errorCode: 'NO_VIDEO',
+          success: true,
+          result: {
+            tweetId: postId,
+            username: targetPost.user?.screen_name || targetPost.user_screen_name || targetPost.author?.screen_name || parsed.username || 'twitter_user',
+            authorName: targetPost.user?.name || targetPost.user_name || targetPost.author?.name || 'Twitter Creator',
+            authorAvatar: targetPost.user?.profile_image_url_https || targetPost.user_profile_image_url || targetPost.author?.avatar_url,
+            tweetText: targetPost.text || (targetPost.raw_text?.text ? targetPost.raw_text.text : data.text || ''),
+            thumbnailUrl: rawPhotos[0].url,
+            duration: `${rawPhotos.length} Photo${rawPhotos.length > 1 ? 's' : ''}`,
+            isVideo: false,
+            isGif: false,
+            isPhoto: true,
+            isQuoted,
+            quotedAuthor: isQuoted ? quotedAuthor : undefined,
+            previewUrl: rawPhotos[0].url,
+            photos: rawPhotos.map((p: any) => ({ url: p.url, width: p.width, height: p.height })),
+            formats: photoFormats,
+          },
         };
       }
+
+      return {
+        success: false,
+        error: 'This tweet contains only text without any attached videos, GIFs, or photos.',
+        errorCode: 'NO_VIDEO',
+      };
     }
   } catch (err) {
     console.error('Client fallback resolver error:', err);

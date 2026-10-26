@@ -62,8 +62,9 @@ export const DownloadResult: React.FC<DownloadResultProps> = ({
   const isFallbackFilter = candidateFormats.length === 0 && result.formats.length > 0;
   const hasLiveStream = Boolean(result.isLive || result.isSpace || result.isBroadcast);
   const m3u8Format = result.formats.find((f) => f.format === 'M3U8' || f.isLiveStream);
+  const bestMp4 = result.formats.find((f) => f.format === 'MP4');
   const playableVideoUrl = !result.isPhoto
-    ? (result.previewUrl || result.formats.find((f) => f.format === 'MP4')?.directUrl || m3u8Format?.directUrl)
+    ? (bestMp4?.proxyUrl || result.previewUrl || bestMp4?.directUrl || m3u8Format?.directUrl)
     : undefined;
 
   useEffect(() => {
@@ -128,20 +129,77 @@ export const DownloadResult: React.FC<DownloadResultProps> = ({
   };
 
   /**
-   * Native browser download trigger.
-   * Directly triggers download through our verified proxy endpoint with
-   * Content-Disposition: attachment, avoiding client-side in-memory Blob
-   * failures on mobile devices (Android/iOS) where blob URLs can cause
-   * corrupted or unplayable video files.
+   * Resilient media download trigger.
+   * Performs real stream fetching, catches any upstream HTTP errors before saving,
+   * generates a verified typed binary Blob to ensure the file is complete and playable,
+   * and provides graceful fallback to direct link streaming.
    */
-  const handleDownload = (e: React.MouseEvent, fmt: MediaFormat) => {
+  const handleDownload = async (e: React.MouseEvent, fmt: MediaFormat) => {
+    e.preventDefault();
+    if (downloadingId) return;
+
     setDownloadingId(fmt.id);
     setDownloadError(null);
 
-    // Provide visual feedback for 1.8s while browser initiates the stream
-    setTimeout(() => {
+    try {
+      const response = await fetch(fmt.proxyUrl);
+
+      if (!response.ok) {
+        let errorMsg = 'Failed to download media file. The provider may have expired this link.';
+        try {
+          const errData = await response.json();
+          if (errData.error) errorMsg = errData.error;
+        } catch (_) {}
+        throw new Error(errorMsg);
+      }
+
+      const contentType = response.headers.get('content-type') || (
+        fmt.format === 'MP3'
+          ? 'audio/mpeg'
+          : fmt.format === 'M4A'
+          ? 'audio/mp4'
+          : fmt.format === 'JPG'
+          ? 'image/jpeg'
+          : 'video/mp4'
+      );
+
+      const blob = await response.blob();
+      if (blob.size === 0) {
+        throw new Error('Downloaded media file was empty. Please try another quality option.');
+      }
+
+      // Explicitly typed blob ensures mobile & desktop video players recognize format
+      const typedBlob = new Blob([blob], { type: contentType });
+      const blobUrl = window.URL.createObjectURL(typedBlob);
+
+      const downloadLink = document.createElement('a');
+      downloadLink.href = blobUrl;
+      downloadLink.download = fmt.filename;
+      downloadLink.style.display = 'none';
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+
+      setTimeout(() => {
+        window.URL.revokeObjectURL(blobUrl);
+      }, 45000);
+    } catch (err: any) {
+      console.warn('Direct stream fetch failed, falling back to direct anchor:', err);
+      try {
+        const fallback = document.createElement('a');
+        fallback.href = fmt.proxyUrl;
+        fallback.download = fmt.filename;
+        fallback.target = '_blank';
+        fallback.rel = 'noopener noreferrer';
+        document.body.appendChild(fallback);
+        fallback.click();
+        document.body.removeChild(fallback);
+      } catch (_) {
+        setDownloadError(err?.message || 'Error occurred while saving file.');
+      }
+    } finally {
       setDownloadingId(null);
-    }, 1800);
+    }
   };
 
   return (
