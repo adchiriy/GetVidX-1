@@ -556,3 +556,14 @@ export const TRANSLATIONS: Record<SupportedLocale, UiTranslations> = {
     copyright: '© 2026 GetVidX. جميع الحقوق محفوظة.',
   },
 };
+
+Object.assign(TRANSLATIONS.en, {
+  badgeText: 'X / Twitter media, made simple',
+  heroTitlePrefix: 'Your favorite X videos.',
+  heroTitleHighlight: 'Ready to save.',
+  heroSubtitle: 'Paste a public post link. Choose the available video quality, save photos, or extract MP3 audio. All in your browser.',
+  feat1Title: 'Original video quality', feat1Desc: 'Choose from the resolutions available in the original post. Quality depends on the source.',
+  feat2Title: 'One link. Available formats.', feat2Desc: 'Multiple media providers help find supported public posts and available formats.',
+  feat5Title: 'Free to use', feat5Desc: 'No account or subscription. Fair-use limits keep the service available for everyone.',
+  stepBadge: 'No installation needed',
+});

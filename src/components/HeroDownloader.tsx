@@ -85,7 +85,7 @@ export const HeroDownloader: React.FC<HeroDownloaderProps> = ({
   };
 
   return (
-    <section className="relative pt-6 pb-12 sm:pb-16 text-center max-w-4xl mx-auto px-4">
+    <section className="hero-surface relative text-center">
       {/* Kicker Tag / Badge */}
       <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-semibold mb-4 border border-blue-100/80 shadow-xs">
         {activeTab === 'live' ? (
@@ -110,7 +110,7 @@ export const HeroDownloader: React.FC<HeroDownloaderProps> = ({
       </p>
 
       {/* Format Switcher Tabs */}
-      <div className="inline-flex flex-wrap items-center justify-center p-1 bg-slate-100/90 rounded-xl mb-6 shadow-inner gap-1" role="tablist">
+      <div className="inline-flex flex-wrap items-center justify-center p-1 bg-slate-100/90 rounded-xl mb-6 shadow-inner gap-1" role="group" aria-label="Media type">
         <button
           type="button"
           onClick={() => setActiveTab('all')}
@@ -119,8 +119,8 @@ export const HeroDownloader: React.FC<HeroDownloaderProps> = ({
               ? 'bg-white text-slate-900 shadow-sm'
               : 'text-slate-600 hover:text-slate-900'
           }`}
-          role="tab"
-          aria-selected={activeTab === 'all'}
+
+          aria-pressed={activeTab === 'all'}
         >
           <Video className="w-4 h-4 text-blue-600" />
           <span>{t.tabVideo}</span>
@@ -134,8 +134,8 @@ export const HeroDownloader: React.FC<HeroDownloaderProps> = ({
               ? 'bg-white text-slate-900 shadow-sm'
               : 'text-slate-600 hover:text-slate-900'
           }`}
-          role="tab"
-          aria-selected={activeTab === 'audio'}
+
+          aria-pressed={activeTab === 'audio'}
         >
           <Music className="w-4 h-4 text-indigo-600" />
           <span>{t.tabAudio}</span>
@@ -149,8 +149,8 @@ export const HeroDownloader: React.FC<HeroDownloaderProps> = ({
               ? 'bg-white text-slate-900 shadow-sm'
               : 'text-slate-600 hover:text-slate-900'
           }`}
-          role="tab"
-          aria-selected={activeTab === 'gif'}
+
+          aria-pressed={activeTab === 'gif'}
         >
           <Sparkles className="w-4 h-4 text-amber-500" />
           <span>{t.tabGif}</span>
@@ -165,8 +165,8 @@ export const HeroDownloader: React.FC<HeroDownloaderProps> = ({
               ? 'bg-red-50 text-red-700 shadow-sm border border-red-200/90'
               : 'text-slate-600 hover:text-red-700'
           }`}
-          role="tab"
-          aria-selected={activeTab === 'live'}
+
+          aria-pressed={activeTab === 'live'}
         >
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
@@ -183,7 +183,10 @@ export const HeroDownloader: React.FC<HeroDownloaderProps> = ({
           <div className="flex-1 flex items-center min-w-0 px-3 py-1">
             <input
               ref={inputRef}
-              type="url"
+              type="text"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
               dir="ltr"
               value={inputUrl}
               onChange={(e) => setInputUrl(e.target.value)}

@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
@@ -40,95 +41,7 @@ async function resolveWithYtDlp(targetUrl: string): Promise<any | null> {
   return null;
 }
 
-const ALLOWED_MEDIA_HOSTS = new Set([
-  'twimg.com',
-  'twitter.com',
-  'x.com',
-  'pscp.tv',
-  'giphy.com',
-]);
-
-/**
- * Validates that host belongs to authorized Twitter/X CDNs and rejects IP literals & localhost
- */
-function isAllowedMediaHost(hostname: string): boolean {
-  const lower = hostname.toLowerCase();
-  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(lower) || lower.includes(':') || lower === 'localhost') {
-    return false;
-  }
-  for (const base of ALLOWED_MEDIA_HOSTS) {
-    if (lower === base || lower.endsWith('.' + base)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Strict media URL validator for SSRF prevention
- */
-function validateMediaUrl(rawUrl: string): URL {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    throw new Error('Invalid media URL format.');
-  }
-
-  // Twitter/X media CDNs are strictly HTTPS
-  if (parsed.protocol !== 'https:') {
-    throw new Error('Only secure HTTPS protocol is permitted for media requests.');
-  }
-
-  if (parsed.port && parsed.port !== '443') {
-    throw new Error('Non-standard ports are strictly forbidden.');
-  }
-
-  if (parsed.username || parsed.password) {
-    throw new Error('Credentials in URL are strictly forbidden.');
-  }
-
-  if (!isAllowedMediaHost(parsed.hostname)) {
-    throw new Error('Access forbidden: only authorized Twitter/X media CDN hosts are permitted.');
-  }
-
-  return parsed;
-}
-
-/**
- * Fetch helper with manual redirect validation.
- * Verifies that the initial URL and any redirect Location headers strictly conform
- * to authorized media CDN domains, preventing SSRF open redirect bypasses.
- */
-async function fetchWithSafeRedirects(
-  initialUrl: string,
-  init: RequestInit,
-  maxRedirects = 5
-): Promise<{ response: globalThis.Response; finalUrl: string }> {
-  let currentUrl = initialUrl;
-  for (let i = 0; i <= maxRedirects; i++) {
-    validateMediaUrl(currentUrl);
-
-    const response = await fetch(currentUrl, {
-      ...init,
-      redirect: 'manual',
-    });
-
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const location = response.headers.get('location');
-      if (!location) {
-        throw new Error('Redirect response missing Location header.');
-      }
-      const nextUrl = new URL(location, currentUrl).toString();
-      validateMediaUrl(nextUrl);
-      currentUrl = nextUrl;
-      continue;
-    }
-
-    return { response, finalUrl: currentUrl };
-  }
-  throw new Error('Exceeded maximum redirect depth.');
-}
+import { validateMediaUrl, fetchWithSafeRedirects, createMediaGateway, rewritePlaylist } from './src/server/media';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -137,7 +50,10 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
   const isProd = process.env.NODE_ENV === 'production';
+  // Only trust a hosting proxy when explicitly configured by the operator.
+  if (process.env.TRUST_PROXY_HOPS) app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS));
   app.use(express.json({ limit: '16kb' }));
+  app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 
   // In-memory IP rate limiter for API endpoints (120 req/min per IP)
   const ipRequests = new Map<string, { count: number; resetTime: number }>();
@@ -154,7 +70,7 @@ async function startServer() {
   }, 5 * 60 * 1000).unref();
 
   app.use('/api', (req, res, next) => {
-    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
     const entry = ipRequests.get(ip);
 
@@ -558,7 +474,7 @@ async function startServer() {
         }
 
         const rawPhotos =
-          (Array.isArray(targetPost.mediaDetails) ? targetPost.mediaDetails.filter((m: any) => m.type === 'photo').map((m: any) => ({ url: m.media_url_https || m.url, width: m.sizes?.large?.w, height: m.sizes?.large?.h })) : null) ||
+          (Array.isArray(targetPost.mediaDetails) && targetPost.mediaDetails.some((m: any) => m.type === 'photo') ? targetPost.mediaDetails.filter((m: any) => m.type === 'photo').map((m: any) => ({ url: m.media_url_https || m.url, width: m.sizes?.large?.w, height: m.sizes?.large?.h })) : null) ||
           (Array.isArray(targetPost.photos) && targetPost.photos.length > 0 ? targetPost.photos.map((p: any) => ({ url: p.url || p.media_url_https })) : null) ||
           (Array.isArray(targetPost.media?.photos) && targetPost.media.photos.length > 0 ? targetPost.media.photos : null) ||
           (Array.isArray(data.media?.photos) && data.media.photos.length > 0 ? data.media.photos : null) ||
@@ -695,7 +611,7 @@ async function startServer() {
 
       const abortController = new AbortController();
       const timeoutId = setTimeout(() => abortController.abort(), 60000); // 60s timeout
-      req.on('close', () => abortController.abort());
+      res.on('close', () => abortController.abort());
 
       const upstreamHeaders: Record<string, string> = {
         'User-Agent':
@@ -720,7 +636,8 @@ async function startServer() {
         5
       );
 
-      clearTimeout(timeoutId);
+      res.once('close', () => clearTimeout(timeoutId));
+      res.once('finish', () => clearTimeout(timeoutId));
 
       if (!upstream.ok && upstream.status !== 206) {
         const errorMsg =
@@ -801,7 +718,7 @@ async function startServer() {
         // Normal client abort / navigation / disconnect should not be logged as upstream failure
         if (
           abortController.signal.aborted ||
-          req.destroyed ||
+
           res.destroyed ||
           streamErr?.name === 'AbortError' ||
           streamErr?.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
@@ -816,7 +733,7 @@ async function startServer() {
       });
     } catch (err: any) {
       if (
-        req.destroyed ||
+
         res.destroyed ||
         err?.name === 'AbortError' ||
         err?.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
@@ -867,7 +784,7 @@ async function startServer() {
 
       // If format is m3u8 playlist, fetch text with safe redirect validation and stream back
       if (requestedFormat === 'm3u8') {
-        const { response: upstream } = await fetchWithSafeRedirects(
+        const { response: upstream, finalUrl } = await fetchWithSafeRedirects(
           mediaUrl,
           {
             headers: {
@@ -892,7 +809,7 @@ async function startServer() {
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`);
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.send(text);
+        res.send(rewritePlaylist(text, finalUrl, url => url));
         return;
       }
 
@@ -928,32 +845,23 @@ async function startServer() {
         return;
       }
 
-      // Pre-resolve redirect chain with strict host validation before passing to FFmpeg
-      let validatedUrl = mediaUrl;
-      try {
-        const { finalUrl } = await fetchWithSafeRedirects(
-          mediaUrl,
-          {
-            method: 'HEAD',
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-              Referer: 'https://twitter.com/',
-            },
-          },
-          5
-        );
-        validatedUrl = finalUrl;
-      } catch (_) {
-        // If HEAD fails (e.g. 405 on some CDNs), initial mediaUrl was already verified by validateMediaUrl
-      }
+      activeFfmpegCount++;
+      let hasDecremented = false;
+      const releaseFfmpegSlot = () => {
+        if (!hasDecremented) { hasDecremented = true; activeFfmpegCount = Math.max(0, activeFfmpegCount - 1); }
+      };
+      let gateway: Awaited<ReturnType<typeof createMediaGateway>>;
+      try { gateway = await createMediaGateway(mediaUrl); }
+      catch (error) { releaseFfmpegSlot(); throw error; }
+      if (res.destroyed) { gateway.close(); releaseFfmpegSlot(); return; }
+      const validatedUrl = gateway.url;
 
       let ffmpegArgs: string[];
       if (isM4a) {
         // True M4A (AAC stereo stream) extraction
         ffmpegArgs = [
           '-loglevel', 'error',
-          '-protocol_whitelist', 'https,tls,tcp,crypto,data,hls',
+          '-protocol_whitelist', 'http,tcp,crypto',
           '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\nReferer: https://twitter.com/\r\n',
           '-i', validatedUrl,
           '-t', '7200',
@@ -968,7 +876,7 @@ async function startServer() {
         // True MP3 stereo stream extraction
         ffmpegArgs = [
           '-loglevel', 'error',
-          '-protocol_whitelist', 'https,tls,tcp,crypto,data,hls',
+          '-protocol_whitelist', 'http,tcp,crypto',
           '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\nReferer: https://twitter.com/\r\n',
           '-i', validatedUrl,
           '-t', '7200',
@@ -982,7 +890,7 @@ async function startServer() {
         // Video MP4 stream remux
         ffmpegArgs = [
           '-loglevel', 'error',
-          '-protocol_whitelist', 'https,tls,tcp,crypto,data,hls',
+          '-protocol_whitelist', 'http,tcp,crypto',
           '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\nReferer: https://twitter.com/\r\n',
           '-i', validatedUrl,
           '-t', '7200',
@@ -993,16 +901,11 @@ async function startServer() {
         ];
       }
 
-      activeFfmpegCount++;
-      let hasDecremented = false;
-      const releaseFfmpegSlot = () => {
-        if (!hasDecremented) {
-          hasDecremented = true;
-          activeFfmpegCount = Math.max(0, activeFfmpegCount - 1);
-        }
-      };
 
       const ffmpeg = spawn('ffmpeg', ffmpegArgs);
+      const jobTimeout = setTimeout(() => ffmpeg.kill('SIGKILL'), 10 * 60 * 1000);
+      ffmpeg.once('close', () => { clearTimeout(jobTimeout); gateway.close(); });
+      ffmpeg.once('error', () => { clearTimeout(jobTimeout); gateway.close(); });
       let hasData = false;
 
       ffmpeg.stdout.on('data', (chunk) => {
@@ -1014,17 +917,18 @@ async function startServer() {
           res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
           res.status(200);
         }
-        res.write(chunk);
+        if (!res.write(chunk)) ffmpeg.stdout.pause();
       });
 
+      res.on('drain', () => ffmpeg.stdout.resume());
       let ffmpegErrorOutput = '';
       ffmpeg.stderr.on('data', (data) => {
-        ffmpegErrorOutput += data.toString();
+        ffmpegErrorOutput = (ffmpegErrorOutput + data.toString()).slice(-8192);
       });
 
       ffmpeg.on('error', (procErr: any) => {
         releaseFfmpegSlot();
-        if (req.destroyed || res.destroyed || procErr?.code === 'ERR_STREAM_PREMATURE_CLOSE') {
+        if ( res.destroyed || procErr?.code === 'ERR_STREAM_PREMATURE_CLOSE') {
           return;
         }
         console.error('FFmpeg process error:', procErr);
@@ -1035,7 +939,7 @@ async function startServer() {
 
       ffmpeg.on('close', (code) => {
         releaseFfmpegSlot();
-        if (code !== 0 && !hasData && !req.destroyed && !res.destroyed) {
+        if (code !== 0 && !hasData && !res.destroyed) {
           console.warn(`FFmpeg closed with code ${code}: ${ffmpegErrorOutput.trim()}`);
           if (!res.headersSent) {
             // Visitor-facing response: clean sanitized message without exposing internal stderr
@@ -1050,14 +954,14 @@ async function startServer() {
         }
       });
 
-      req.on('close', () => {
-        releaseFfmpegSlot();
+      res.on('close', () => {
+        gateway.close();
         try {
           ffmpeg.kill('SIGKILL');
         } catch (_) {}
       });
     } catch (err: any) {
-      if (req.destroyed || res.destroyed || err?.name === 'AbortError' || err?.message?.includes('aborted')) {
+      if ( res.destroyed || err?.name === 'AbortError' || err?.message?.includes('aborted')) {
         return;
       }
       console.error('Live download error:', err);

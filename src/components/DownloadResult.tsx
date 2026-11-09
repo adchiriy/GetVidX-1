@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import Hls from 'hls.js';
+
 import {
   Download,
   Copy,
@@ -71,10 +71,14 @@ export const DownloadResult: React.FC<DownloadResultProps> = ({
     const video = videoRef.current;
     if (!video || !playableVideoUrl) return;
 
-    const isHls = playableVideoUrl.includes('.m3u8');
-    let hlsInstance: Hls | null = null;
+    const isHls = !bestMp4 && playableVideoUrl.includes('.m3u8');
+    let hlsInstance: import('hls.js').default | null = null;
+    let disposed = false;
+    void (async () => {
+    const Hls = isHls ? (await import('hls.js')).default : null;
+    if (disposed) return;
 
-    if (isHls && Hls.isSupported()) {
+    if (Hls && Hls.isSupported()) {
       hlsInstance = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
@@ -100,7 +104,9 @@ export const DownloadResult: React.FC<DownloadResultProps> = ({
       video.src = playableVideoUrl;
     }
 
+    })();
     return () => {
+      disposed = true;
       if (hlsInstance) {
         hlsInstance.destroy();
       }
@@ -162,6 +168,7 @@ export const DownloadResult: React.FC<DownloadResultProps> = ({
     };
 
     const triggerDirectFallback = () => {
+      if (fmt.isAudioOnly || fmt.isLiveStream) throw new Error(t.errorNetwork);
       const fallbackUrl = fmt.directUrl || fmt.proxyUrl;
       const fallback = document.createElement('a');
       fallback.href = fallbackUrl;
@@ -185,12 +192,16 @@ export const DownloadResult: React.FC<DownloadResultProps> = ({
       if (fmt.proxyUrl) {
         try {
           const res = await fetch(fmt.proxyUrl);
-          if (res.ok) {
+          if (res.ok && !/text\/html|application\/json/i.test(res.headers.get('content-type') || '')) {
             response = res;
           }
         } catch (_) {
           // Proxy endpoint unavailable or network error
         }
+      }
+
+      if (!response && (fmt.isAudioOnly || fmt.isLiveStream)) {
+        throw new Error(t.errorNetwork);
       }
 
       // 2. If proxy is unavailable or returned 404/5xx (e.g. Vercel frontend without backend),
@@ -227,7 +238,11 @@ export const DownloadResult: React.FC<DownloadResultProps> = ({
       // 3. If binary streaming was not possible, trigger fallback on real media URL
       triggerDirectFallback();
     } catch (err: any) {
-      console.warn('Download handler error, triggering direct fallback:', err);
+      if (fmt.isAudioOnly || fmt.isLiveStream) {
+        setDownloadError(t.errorNetwork);
+        return;
+      }
+      console.warn('Download handler error:', err);
       try {
         triggerDirectFallback();
       } catch (_) {

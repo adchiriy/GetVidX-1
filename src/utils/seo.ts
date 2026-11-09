@@ -1,6 +1,7 @@
 import { SupportedLocale, LOCALES } from '../i18n/types';
 
-export const CANONICAL_DOMAIN = 'https://getvidx.com';
+import { SITE_URL } from '../config';
+export const CANONICAL_DOMAIN = SITE_URL;
 
 export interface SeoMetadataOptions {
   locale: SupportedLocale;

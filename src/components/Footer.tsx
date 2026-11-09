@@ -34,9 +34,7 @@ export const Footer: React.FC<FooterProps> = ({ currentLocale, onSelectLocale, o
               {t.footerDesc}
             </p>
 
-            <div className="text-xs font-mono text-slate-400 bg-white px-2.5 py-1 rounded-md border border-slate-200">
-              Canonical Domain: <span className="text-slate-600 font-semibold">https://getvidx.com</span>
-            </div>
+
           </div>
 
           {/* Media Converters */}

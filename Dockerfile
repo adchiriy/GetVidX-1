@@ -17,12 +17,14 @@ WORKDIR /app
 
 # Install Node dependencies first for Docker layer caching
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 # Copy application source code
 COPY . .
 
 # Build Vite client production bundle (served statically by Express in production)
+ARG VITE_SITE_URL=https://getvidx.com
+ENV VITE_SITE_URL=$VITE_SITE_URL
 RUN npm run build
 
 # Expose default HTTP port

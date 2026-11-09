@@ -60,6 +60,9 @@ export const HowItWorks: React.FC<HowItWorksProps> = ({ currentLocale }) => {
                   </div>
                 </div>
 
+                <div className="step-demo" aria-hidden="true">
+                  {idx === 0 ? <div className="demo-post"><b>X</b><span>x.com / status / …</span><Copy className="w-4 h-4" /></div> : idx === 1 ? <div className="demo-input"><span>https://x.com/…</span><ArrowRight className="w-4 h-4" /></div> : <div className="demo-formats"><span><Download className="w-3 h-3" /> MP4 · HD</span><span><Download className="w-3 h-3" /> MP3 · 192 kbps</span></div>}
+                </div>
                 <h3 className="text-base sm:text-lg font-bold text-slate-900 mb-2">
                   {step.title}
                 </h3>

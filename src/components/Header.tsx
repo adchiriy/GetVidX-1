@@ -172,8 +172,8 @@ export const Header: React.FC<HeaderProps> = ({ currentLocale, onSelectLocale, o
           {/* Privacy & Trust Verified Icon */}
           <div
             className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-emerald-600 transition-colors"
-            title="Safe, Secure & Encrypted - Zero User Tracking"
-            aria-label="Verified Security"
+            title="Public X / Twitter media"
+            aria-label="Public media only"
           >
             <ShieldCheck className="w-5 h-5" />
           </div>

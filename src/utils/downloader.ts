@@ -300,6 +300,7 @@ export async function analyzeTweet(rawUrl: string): Promise<DownloaderResponse> 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: parsed.normalizedUrl, postId }),
+      signal: AbortSignal.timeout(20_000),
     });
 
     try {
@@ -334,7 +335,7 @@ export async function analyzeTweet(rawUrl: string): Promise<DownloaderResponse> 
 
     for (const ep of endpoints) {
       try {
-        const res = await fetch(ep);
+        const res = await fetch(ep, { signal: AbortSignal.timeout(5_000) });
         if (res.ok) {
           const json = await res.json();
           if (json.tombstone) continue;
@@ -521,7 +522,7 @@ export async function analyzeTweet(rawUrl: string): Promise<DownloaderResponse> 
 
       // Check for Photos if no video was found
       const rawPhotos =
-        (Array.isArray(targetPost.mediaDetails) ? targetPost.mediaDetails.filter((m: any) => m.type === 'photo').map((m: any) => ({ url: m.media_url_https || m.url, width: m.sizes?.large?.w, height: m.sizes?.large?.h })) : null) ||
+        (Array.isArray(targetPost.mediaDetails) && targetPost.mediaDetails.some((m: any) => m.type === 'photo') ? targetPost.mediaDetails.filter((m: any) => m.type === 'photo').map((m: any) => ({ url: m.media_url_https || m.url, width: m.sizes?.large?.w, height: m.sizes?.large?.h })) : null) ||
         (Array.isArray(targetPost.photos) && targetPost.photos.length > 0 ? targetPost.photos.map((p: any) => ({ url: p.url || p.media_url_https })) : null) ||
         (Array.isArray(targetPost.media?.photos) && targetPost.media.photos.length > 0 ? targetPost.media.photos : null) ||
         (Array.isArray(data.media?.photos) && data.media.photos.length > 0 ? data.media.photos : null) ||

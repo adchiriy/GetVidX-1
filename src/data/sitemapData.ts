@@ -2,7 +2,8 @@ import { PSEO_PAGES } from './pseoPages';
 import { LEGAL_PAGES } from './legalPages';
 import { SupportedLocale } from '../i18n/types';
 
-export const BASE_PRODUCTION_DOMAIN = 'https://getvidx.com';
+import { SITE_URL } from '../config';
+export const BASE_PRODUCTION_DOMAIN = SITE_URL;
 
 const LOCALES: SupportedLocale[] = ['en', 'es', 'fr', 'pt', 'ar'];
 

@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { Header } from './components/Header';
 import { HeroDownloader } from './components/HeroDownloader';
-import { DownloadResult } from './components/DownloadResult';
+const DownloadResult = lazy(() => import('./components/DownloadResult').then(m => ({ default: m.DownloadResult })));
+import { resolveRoute } from './utils/prerender';
 import { HowItWorks } from './components/HowItWorks';
 import { WhyChooseUs } from './components/WhyChooseUs';
 import { FaqSection } from './components/FaqSection';
-import { SponsoredAdSlot } from './components/SponsoredAdSlot';
+
 import { PseoPageTemplate } from './components/PseoPageTemplate';
 import { LegalPageTemplate } from './components/LegalPageTemplate';
 import { Footer } from './components/Footer';
@@ -34,6 +35,11 @@ export default function App() {
   const [analysisResult, setAnalysisResult] = useState<TweetAnalysisResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'all' | 'audio' | 'gif' | 'live'>('all');
+
+  useEffect(() => {
+    if (currentPath === '/twitter-to-mp3') setActiveTab('audio');
+    else if (currentPath === '/twitter-gif-downloader') setActiveTab('gif');
+  }, [currentPath]);
 
   // Detect locale from URL path e.g. /ar/..., /es/..., /fr/..., /pt/...
   const parseLocaleAndPath = useCallback((pathname: string) => {
@@ -138,7 +144,7 @@ export default function App() {
       setInputUrl(directCheck.normalizedUrl);
       handleAnalyze(directCheck.normalizedUrl);
     }
-  }, [parseLocaleAndPath, handleAnalyze]);
+  }, [parseLocaleAndPath]);
 
   // Update HTML dir, lang and SEO tags on state changes
   useEffect(() => {
@@ -254,7 +260,7 @@ export default function App() {
                   setActiveTab={setActiveTab}
                 />
                 {analysisResult && (
-                  <DownloadResult
+                  <Suspense fallback={<p role="status" className="text-center p-8">{t.analyzingBtn}</p>}><DownloadResult
                     currentLocale={currentLocale}
                     result={analysisResult}
                     onReset={() => {
@@ -262,7 +268,7 @@ export default function App() {
                       setInputUrl('');
                     }}
                     activeFilter={activeTab}
-                  />
+                  /></Suspense>
                 )}
               </>
             )}
@@ -274,11 +280,13 @@ export default function App() {
             currentLocale={currentLocale}
             onNavigate={handleNavigate}
           />
+        ) : resolveRoute(window.location.pathname).pageType === 'not_found' ? (
+          <section className="py-24 text-center"><h1 className="text-4xl font-bold mb-6">404</h1><button onClick={() => handleNavigate('/')} className="text-blue-600">{t.navDownloader} →</button></section>
         ) : (
           /* Standard Homepage Layout Matching Exact Design */
           <>
             {/* Header Display Reserved Ad Space (Strictly decoupled) */}
-            <SponsoredAdSlot label={t.adLabelHeader} notice={t.adNotice} />
+
 
             {/* Hero Downloader Box */}
             <HeroDownloader
@@ -294,7 +302,7 @@ export default function App() {
 
             {/* Live Media Download Results */}
             {analysisResult && (
-              <DownloadResult
+              <Suspense fallback={<p role="status" className="text-center p-8">{t.analyzingBtn}</p>}><DownloadResult
                 currentLocale={currentLocale}
                 result={analysisResult}
                 onReset={() => {
@@ -302,11 +310,11 @@ export default function App() {
                   setInputUrl('');
                 }}
                 activeFilter={activeTab}
-              />
+              /></Suspense>
             )}
 
             {/* Under-Result Reserved Ad Space (Strictly decoupled) */}
-            <SponsoredAdSlot label={t.adLabelResult} notice={t.adNotice} />
+
 
             {/* 3-Step How It Works Section */}
             <HowItWorks currentLocale={currentLocale} />

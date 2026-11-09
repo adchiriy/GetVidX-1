@@ -16,6 +16,10 @@
     {
       "source": "/sitemap_1.xml",
       "destination": "https://REPLACE_WITH_YOUR_BACKEND_HOST/sitemap_1.xml"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "https://REPLACE_WITH_YOUR_BACKEND_HOST/$1"
     }
   ]
 }
