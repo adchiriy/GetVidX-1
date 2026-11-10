@@ -951,6 +951,10 @@ export async function createApp({ apiOnly = false } = {}) {
 
       ffmpeg.on('close', (code) => {
         releaseFfmpegSlot();
+        if (code !== 0 && hasData && !res.destroyed) {
+          res.destroy(new Error('Media conversion ended before completion.'));
+          return;
+        }
         if (code !== 0 && !hasData && !res.destroyed) {
           console.warn(`FFmpeg closed with code ${code}: ${ffmpegErrorOutput.trim()}`);
           if (!res.headersSent) {
