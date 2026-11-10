@@ -872,7 +872,7 @@ export async function createApp({ apiOnly = false } = {}) {
       if (isM4a) {
         // True M4A (AAC stereo stream) extraction
         ffmpegArgs = [
-          '-loglevel', 'error',
+          '-nostdin', '-loglevel', 'info',
           '-protocol_whitelist', 'http,tcp,crypto',
           '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\nReferer: https://twitter.com/\r\n',
           '-i', validatedUrl,
@@ -887,7 +887,7 @@ export async function createApp({ apiOnly = false } = {}) {
       } else if (isMp3) {
         // True MP3 stereo stream extraction
         ffmpegArgs = [
-          '-loglevel', 'error',
+          '-nostdin', '-loglevel', 'info',
           '-protocol_whitelist', 'http,tcp,crypto',
           '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\nReferer: https://twitter.com/\r\n',
           '-i', validatedUrl,
@@ -901,7 +901,7 @@ export async function createApp({ apiOnly = false } = {}) {
       } else {
         // Video MP4 stream remux
         ffmpegArgs = [
-          '-loglevel', 'error',
+          '-nostdin', '-loglevel', 'info',
           '-protocol_whitelist', 'http,tcp,crypto',
           '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\nReferer: https://twitter.com/\r\n',
           '-i', validatedUrl,
@@ -945,7 +945,8 @@ export async function createApp({ apiOnly = false } = {}) {
           if (!res.headersSent) res.status(502).json({
             error: 'The live recording could not be completed. Please retry.',
             errorCode: writeError?.code || `CONVERTER_EXIT_${code}`,
-            reason: ffmpegErrorOutput.match(/Protocol not found|Invalid data[^\n]*|Permission denied|No such file[^\n]*|Option [^\n]*|Error number [^\n]*|Server returned \d+[^\n]*/)?.[0],
+            reason: ffmpegErrorOutput.split('\n').filter(line => !/https?:|token=|url=/i.test(line)).slice(-6).join(' ').slice(-800),
+            failure: ffmpegErrorOutput.match(/Protocol not found|Invalid data[^\n]*|Permission denied|No such file[^\n]*|Option [^\n]*|Error number [^\n]*|Server returned \d+[^\n]*/)?.[0],
           });
           return;
         }
