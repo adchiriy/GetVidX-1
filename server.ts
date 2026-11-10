@@ -3,6 +3,9 @@ import express, { Request, Response } from 'express';
 import ffmpegStatic from 'ffmpeg-static';
 import path from 'path';
 import fs from 'fs';
+import os from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { Readable } from 'stream';
 import { spawn, execFile } from 'child_process';
@@ -918,56 +921,39 @@ export async function createApp({ apiOnly = false } = {}) {
       const jobTimeout = setTimeout(() => ffmpeg.kill('SIGKILL'), process.env.VERCEL ? 270_000 : 10 * 60 * 1000);
       ffmpeg.once('close', () => { clearTimeout(jobTimeout); gateway.close(); });
       ffmpeg.once('error', () => { clearTimeout(jobTimeout); gateway.close(); });
-      let hasData = false;
-
-      ffmpeg.stdout.on('data', (chunk) => {
-        if (!hasData) {
-          hasData = true;
-          res.setHeader('Content-Type', contentType);
-          res.setHeader('Content-Disposition', disposition);
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
-          res.status(200);
-        }
-        if (!res.write(chunk)) ffmpeg.stdout.pause();
-      });
-
-      res.on('drain', () => ffmpeg.stdout.resume());
+      const outputPath = path.join(os.tmpdir(), `getvidx-${randomUUID()}.media`);
+      const output = fs.createWriteStream(outputPath);
+      let bytes = 0;
       let ffmpegErrorOutput = '';
-      ffmpeg.stderr.on('data', (data) => {
-        ffmpegErrorOutput = (ffmpegErrorOutput + data.toString()).slice(-8192);
+      const cleanup = () => fs.promises.unlink(outputPath).catch(() => {});
+      const saved = pipeline(ffmpeg.stdout, output).catch(error => error);
+      ffmpeg.stdout.on('data', chunk => {
+        bytes += chunk.length;
+        if (bytes > 100 * 1024 * 1024) ffmpeg.kill('SIGKILL');
       });
-
-      ffmpeg.on('error', (procErr: any) => {
+      ffmpeg.stderr.on('data', data => { ffmpegErrorOutput = (ffmpegErrorOutput + data.toString()).slice(-8192); });
+      ffmpeg.on('error', () => {
         releaseFfmpegSlot();
-        if ( res.destroyed || procErr?.code === 'ERR_STREAM_PREMATURE_CLOSE') {
+        if (!res.headersSent && !res.destroyed) res.status(500).json({ error: 'Failed to start media converter.' });
+      });
+      ffmpeg.on('close', async code => {
+        releaseFfmpegSlot();
+        const writeError = await saved;
+        if (res.destroyed) { await cleanup(); return; }
+        if (code !== 0 || writeError || bytes === 0) {
+          await cleanup();
+          if (!res.headersSent) res.status(502).json({ error: 'The live recording could not be completed. Please retry.' });
           return;
         }
-        console.error('FFmpeg process error:', procErr);
-        if (!res.headersSent && !hasData) {
-          res.status(500).json({ error: 'Failed to start media converter.' });
-        }
-      });
-
-      ffmpeg.on('close', (code) => {
-        releaseFfmpegSlot();
-        if (code !== 0 && hasData && !res.destroyed) {
-          res.destroy(new Error('Media conversion ended before completion.'));
-          return;
-        }
-        if (code !== 0 && !hasData && !res.destroyed) {
-          console.warn(`FFmpeg closed with code ${code}: ${ffmpegErrorOutput.trim()}`);
-          if (!res.headersSent) {
-            // Visitor-facing response: clean sanitized message without exposing internal stderr
-            res.status(502).json({
-              error: 'The live stream or media could not be converted or has ended.',
-            });
-            return;
-          }
-        }
-        if (!res.writableEnded) {
-          res.end();
-        }
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', disposition);
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('X-Conversion-Bytes', String(bytes));
+        res.status(200);
+        try { await pipeline(fs.createReadStream(outputPath), res); }
+        catch { res.destroy(); }
+        finally { await cleanup(); }
       });
 
       res.on('close', () => {
@@ -1045,4 +1031,3 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(`[GetVidX] Server listening on http://0.0.0.0:${PORT}`);
   });
 }
-
