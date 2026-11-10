@@ -43,6 +43,13 @@ export const DownloadResult: React.FC<DownloadResultProps> = ({
   activeFilter,
 }) => {
   const t = TRANSLATIONS[currentLocale];
+  const conversionNotice = {
+    en: 'Free hosting: converted live recordings and audio are limited to the first 4 minutes. Original MP4 downloads keep their original duration.',
+    fr: 'Hébergement gratuit : les conversions live et audio sont limitées aux 4 premières minutes. Les MP4 originaux conservent leur durée.',
+    es: 'Alojamiento gratuito: las conversiones en directo y de audio se limitan a los primeros 4 minutos. Los MP4 originales conservan su duración.',
+    pt: 'Hospedagem gratuita: conversões de lives e áudio limitadas aos primeiros 4 minutos. Os MP4 originais mantêm sua duração.',
+    ar: 'الاستضافة المجانية: تحويل البث والصوت محدود في أول 4 دقائق. تحميل MP4 الأصلي يحتفظ بمدته الأصلية.',
+  }[currentLocale];
   const [copiedFormatId, setCopiedFormatId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -258,6 +265,9 @@ export const DownloadResult: React.FC<DownloadResultProps> = ({
       id="download-results"
       className="max-w-4xl mx-auto my-8 px-4"
     >
+      {result.conversionLimitSeconds && (
+        <p role="note" className="mb-4 rounded-xl border border-slate-200 bg-blue-50 p-4 text-sm text-slate-900">{conversionNotice}</p>
+      )}
       <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xl shadow-slate-100 overflow-hidden">
         {/* Card Header */}
         <div className="bg-slate-50/80 px-6 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">

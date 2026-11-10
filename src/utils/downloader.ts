@@ -17,6 +17,7 @@ export interface MediaFormat {
 }
 
 export interface TweetAnalysisResult {
+  conversionLimitSeconds?: number;
   tweetId: string;
   username: string;
   authorName: string;
@@ -300,7 +301,7 @@ export async function analyzeTweet(rawUrl: string): Promise<DownloaderResponse> 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: parsed.normalizedUrl, postId }),
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(40_000),
     });
 
     try {

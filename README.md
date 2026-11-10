@@ -34,11 +34,15 @@ npm start
 
 Set `NODE_ENV=production` in your host environment. Set `VITE_SITE_URL` consistently at build and runtime. Copy `.env.example` to `.env` for local settings. Only configure `TRUST_PROXY_HOPS` when the network path and number of trusted reverse proxies are known. Put rate limits and resource limits at your hosting edge for multi-instance deployments.
 
-## Optional Vercel frontend
+## Vercel Hobby deployment (no separate backend)
 
-First deploy the Docker backend. Copy `vercel.json.example` to `vercel.json`, replace its backend hostname, and deploy. The final catch-all rewrite routes page requests through Express so deep links and localized metadata work. Do not deploy just the static client expecting audio conversion to run there. The duplicate serverless media proxy was removed so all media requests use one policy.
+The repository now includes `api/index.ts` and `vercel.json`. Push to main on the connected Vercel project. Build preparation downloads the official standalone Linux yt-dlp executable and verifies its SHA-256 checksum. `ffmpeg-static` supplies FFmpeg. There are no API keys or paid third-party services.
 
-Sites hosting uses Cloudflare Workers and cannot run FFmpeg/yt-dlp subprocesses; this full application is packaged for a Node/Docker host instead of publishing a nonfunctional static clone.
+The Vercel Function serves `/api/health`, `/api/analyze`, `/api/proxy-download`, and `/api/live-download`. The frontend remains a static Vite build. Existing Docker deployment remains supported.
+
+Hobby usage quotas still apply. Functions have a maximum five-minute invocation with Fluid Compute. Converted live/audio output is explicitly limited to the first 240 seconds, with a 270-second process deadline and a visible notice in the result. Original MP4 downloads retain their source duration. This is not an unlimited live recorder. No paid plan or service is enabled by this code.
+
+Check `/api/health`: `converter` and `resolver` should both be true on Vercel. If the deployed plan predates Fluid Compute, check the project's function duration setting before using longer conversions.
 
 ## Checks
 
@@ -50,7 +54,7 @@ npm run build
 
 `lint` runs TypeScript. Tests cover media URL validation, nested HLS URI rewriting, redirect rejection, Twitter URL parsing, converter format routing, and empty-provider photo fallback.
 
-Verified during delivery: normal npm installation; TypeScript and production build; six passing tests; desktop/mobile UI and Arabic RTL with no horizontal overflow; invalid-link UI; home, locale, MP3, privacy, 404, robots and sitemap routes; real public-post analysis; real partial MP4 download (HTTP 206, MP4 `ftyp` signature). Local FFmpeg/yt-dlp and Docker were unavailable, so actual audio/live conversion and the Docker image were not executed here. Test those on the chosen host before launch. External X/provider availability can vary.
+Verified during delivery: normal npm installation; TypeScript and production build; six passing tests; desktop/mobile UI and Arabic RTL with no horizontal overflow; invalid-link UI; home, locale, MP3, privacy, 404, robots and sitemap routes; real public-post analysis; real partial MP4 download (HTTP 206, MP4 `ftyp` signature). The new native FFmpeg regression test generates an HLS fixture and remuxes it through the protected gateway. Docker itself was not executed here. Test those on the chosen host before launch. External X/provider availability can vary.
 
 ## Merge decisions
 

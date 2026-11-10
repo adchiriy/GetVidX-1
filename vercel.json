@@ -1,0 +1,14 @@
+{
+  "framework": "vite",
+  "buildCommand": "node scripts/prepare-vercel.mjs && npm run build",
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 300,
+      "includeFiles": "{.vercel-bin/**,node_modules/ffmpeg-static/ffmpeg}"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/index?endpoint=:path*" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}

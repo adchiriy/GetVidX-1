@@ -1,9 +1,9 @@
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
-import { createServer as createViteServer } from 'vite';
+import ffmpegStatic from 'ffmpeg-static';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { Readable } from 'stream';
 import { spawn, execFile } from 'child_process';
 import { promisify } from 'util';
@@ -23,14 +23,15 @@ const execFileAsync = promisify(execFile);
  */
 async function resolveWithYtDlp(targetUrl: string): Promise<any | null> {
   try {
-    const ytdlpBin = fs.existsSync('/usr/local/bin/yt-dlp') ? '/usr/local/bin/yt-dlp' : 'yt-dlp';
+    const packagedYtdlp = path.resolve(process.cwd(), '.vercel-bin/yt-dlp');
+    const ytdlpBin = fs.existsSync(packagedYtdlp) ? packagedYtdlp : fs.existsSync('/usr/local/bin/yt-dlp') ? '/usr/local/bin/yt-dlp' : 'yt-dlp';
     const { stdout } = await execFileAsync(ytdlpBin, [
       '--dump-json',
       '--no-playlist',
       '--no-warnings',
-      '--socket-timeout', '6',
+      '--socket-timeout', '10',
       targetUrl,
-    ], { timeout: 10000 });
+    ], { timeout: 25000, maxBuffer: 8 * 1024 * 1024 });
 
     if (stdout && stdout.trim()) {
       return JSON.parse(stdout.trim());
@@ -46,14 +47,22 @@ import { validateMediaUrl, fetchWithSafeRedirects, createMediaGateway, rewritePl
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-async function startServer() {
+export async function createApp({ apiOnly = false } = {}) {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
   const isProd = process.env.NODE_ENV === 'production';
   // Only trust a hosting proxy when explicitly configured by the operator.
   if (process.env.TRUST_PROXY_HOPS) app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS));
   app.use(express.json({ limit: '16kb' }));
-  app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+  app.use('/api/analyze', (_req, res, next) => {
+    const json = res.json.bind(res);
+    res.json = (body: any) => {
+      if (process.env.VERCEL && body?.result) body.result.conversionLimitSeconds = 240;
+      return json(body);
+    };
+    next();
+  });
+  app.get('/api/health', (_req, res) => res.json({ status: 'ok', converter: Boolean(ffmpegStatic), resolver: fs.existsSync(path.resolve(process.cwd(), '.vercel-bin/yt-dlp')), maxRecordingSeconds: process.env.VERCEL ? 240 : 7200 }));
 
   // In-memory IP rate limiter for API endpoints (120 req/min per IP)
   const ipRequests = new Map<string, { count: number; resetTime: number }>();
@@ -864,7 +873,7 @@ async function startServer() {
           '-protocol_whitelist', 'http,tcp,crypto',
           '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\nReferer: https://twitter.com/\r\n',
           '-i', validatedUrl,
-          '-t', '7200',
+          '-t', process.env.VERCEL ? '240' : '7200',
           '-vn',
           '-c:a', 'aac',
           '-b:a', '192k',
@@ -879,7 +888,7 @@ async function startServer() {
           '-protocol_whitelist', 'http,tcp,crypto',
           '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\nReferer: https://twitter.com/\r\n',
           '-i', validatedUrl,
-          '-t', '7200',
+          '-t', process.env.VERCEL ? '240' : '7200',
           '-vn',
           '-c:a', 'libmp3lame',
           '-b:a', '192k',
@@ -893,7 +902,7 @@ async function startServer() {
           '-protocol_whitelist', 'http,tcp,crypto',
           '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\nReferer: https://twitter.com/\r\n',
           '-i', validatedUrl,
-          '-t', '7200',
+          '-t', process.env.VERCEL ? '240' : '7200',
           '-c', 'copy',
           '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
           '-f', 'mp4',
@@ -902,8 +911,11 @@ async function startServer() {
       }
 
 
-      const ffmpeg = spawn('ffmpeg', ffmpegArgs);
-      const jobTimeout = setTimeout(() => ffmpeg.kill('SIGKILL'), 10 * 60 * 1000);
+      if (new URL(mediaUrl).pathname.endsWith('.m3u8')) {
+        ffmpegArgs.splice(ffmpegArgs.indexOf('-i'), 0, '-allowed_extensions', 'ALL');
+      }
+      const ffmpeg = spawn(ffmpegStatic || 'ffmpeg', ffmpegArgs);
+      const jobTimeout = setTimeout(() => ffmpeg.kill('SIGKILL'), process.env.VERCEL ? 270_000 : 10 * 60 * 1000);
       ffmpeg.once('close', () => { clearTimeout(jobTimeout); gateway.close(); });
       ffmpeg.once('error', () => { clearTimeout(jobTimeout); gateway.close(); });
       let hasData = false;
@@ -972,7 +984,9 @@ async function startServer() {
   });
 
   // 6. Mount Vite middleware for development or serve dist for production with SEO prerendering
+  if (apiOnly) return app;
   if (!isProd) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
@@ -1017,9 +1031,14 @@ async function startServer() {
     });
   }
 
+  return app;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const app = await createApp();
+  const PORT = Number(process.env.PORT) || 3000;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[GetVidX] Server listening on http://0.0.0.0:${PORT}`);
   });
 }
 
-startServer();
