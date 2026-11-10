@@ -942,7 +942,11 @@ export async function createApp({ apiOnly = false } = {}) {
         if (res.destroyed) { await cleanup(); return; }
         if (code !== 0 || writeError || bytes === 0) {
           await cleanup();
-          if (!res.headersSent) res.status(502).json({ error: 'The live recording could not be completed. Please retry.' });
+          if (!res.headersSent) res.status(502).json({
+            error: 'The live recording could not be completed. Please retry.',
+            errorCode: writeError?.code || `CONVERTER_EXIT_${code}`,
+            reason: ffmpegErrorOutput.match(/Protocol not found|Invalid data[^\n]*|Permission denied|No such file[^\n]*|Option [^\n]*|Error number [^\n]*|Server returned \d+[^\n]*/)?.[0],
+          });
           return;
         }
         res.setHeader('Content-Type', contentType);
