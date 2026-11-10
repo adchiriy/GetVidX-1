@@ -907,6 +907,7 @@ export async function createApp({ apiOnly = false } = {}) {
           '-i', validatedUrl,
           '-t', process.env.VERCEL ? '240' : '7200',
           '-c', 'copy',
+          '-bsf:a', 'aac_adtstoasc',
           '-avoid_negative_ts', 'make_zero',
           '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
           '-f', 'mp4',
@@ -946,7 +947,6 @@ export async function createApp({ apiOnly = false } = {}) {
           if (!res.headersSent) res.status(502).json({
             error: 'The live recording could not be completed. Please retry.',
             errorCode: writeError?.code || `CONVERTER_EXIT_${code}`,
-            reason: ffmpegErrorOutput.split('\n').filter(line => !/https?:|token=|url=/i.test(line)).slice(-20).join(' ').slice(-3500),
             failure: ffmpegErrorOutput.match(/Protocol not found|Invalid data[^\n]*|Permission denied|No such file[^\n]*|Option [^\n]*|Error number [^\n]*|Server returned \d+[^\n]*/)?.[0],
           });
           return;

@@ -15,7 +15,7 @@ test('native FFmpeg remuxes HLS fetched through the protected loopback gateway',
   const originalFetch = globalThis.fetch;
   let gateway: Awaited<ReturnType<typeof createMediaGateway>> | undefined;
   try {
-    await exec(ffmpeg, ['-v','error','-f','lavfi','-i','color=c=blue:s=160x90:r=10','-t','1','-c:v','libx264','-pix_fmt','yuv420p','-f','hls','-hls_time','1',path.join(dir,'master.m3u8')]);
+    await exec(ffmpeg, ['-v','error','-f','lavfi','-i','color=c=blue:s=160x90:r=10','-f','lavfi','-i','sine=frequency=440:sample_rate=44100','-t','1','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-f','hls','-hls_time','1',path.join(dir,'master.m3u8')]);
     globalThis.fetch = async (url) => {
       const parsed = new URL(String(url));
       assert.equal(parsed.hostname, 'video.twimg.com');
@@ -24,7 +24,7 @@ test('native FFmpeg remuxes HLS fetched through the protected loopback gateway',
     };
     gateway = await createMediaGateway('https://video.twimg.com/master.m3u8');
     const output = path.join(dir, 'output.mp4');
-    await exec(ffmpeg, ['-v','error','-protocol_whitelist','http,tcp,crypto','-allowed_extensions','ALL','-i',gateway.url,'-c','copy','-f','mp4',output]);
+    await exec(ffmpeg, ['-v','error','-protocol_whitelist','http,tcp,crypto','-allowed_extensions','ALL','-i',gateway.url,'-c','copy','-bsf:a','aac_adtstoasc','-movflags','frag_keyframe+empty_moov+default_base_moof','-f','mp4',output]);
     assert.equal((await readFile(output)).subarray(4,8).toString(), 'ftyp');
   } finally {
     gateway?.close(); globalThis.fetch = originalFetch;
