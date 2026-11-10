@@ -1,4 +1,4 @@
-import { createApp } from '../server';
+import { createApp } from '../../server';
 
 // One warm Express instance; no listener and no development server in a Function.
 const app = createApp({ apiOnly: true });

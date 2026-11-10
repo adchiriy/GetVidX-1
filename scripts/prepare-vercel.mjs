@@ -1,5 +1,9 @@
 import { mkdir, writeFile, chmod } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { build } from 'esbuild';
+
+await build({ entryPoints: ['src/server/vercel-handler.ts'], outfile: '.vercel-server/handler.mjs',
+  bundle: true, platform: 'node', target: 'node22', format: 'esm', packages: 'external' });
 
 // Standalone Linux executable: no Python installation or separate hosting account.
 if (process.platform !== 'linux' || !process.env.VERCEL) process.exit(0);
