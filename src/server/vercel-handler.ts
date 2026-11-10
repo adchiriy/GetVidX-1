@@ -10,5 +10,13 @@ export default async function handler(req: any, res: any) {
   }
   url.searchParams.delete('endpoint');
   req.url = `/api/${endpoint}${url.searchParams.size ? '?' + url.searchParams.toString() : ''}`;
-  (await app)(req, res);
+  const expressApp = await app;
+  // Keep the Function invocation alive until the complete media stream finishes.
+  // Resolving immediately after Express dispatch can truncate a streaming reply.
+  await new Promise<void>((resolve, reject) => {
+    res.once('finish', resolve);
+    res.once('close', resolve);
+    res.once('error', reject);
+    expressApp(req, res);
+  });
 }
